@@ -31,13 +31,16 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private static final int CHECK_TIME = 45;             // сколько кадров занимает безопасная проверка вазы
 
-    // Семь грехов: где в коридоре дверь каждого греха и куда возвращаться из комнаты
-    private static final int[] HALL_COL = {6, 15, 24, 33, 10, 19, 28};
-    private static final int[] HALL_ROW = {4, 4, 4, 4, 7, 7, 7};          // клетка под/над дверью
-    private static final Theme[] SIN_THEMES = {Theme.PRIDE, Theme.GREED, Theme.WRATH, Theme.ENVY,
-            Theme.LUST, Theme.GLUTTONY, Theme.SLOTH};
-    private static final String[] SIN_NAMES = {"Гордыня", "Жадность", "Гнев", "Зависть",
-            "Похоть", "Чревоугодие", "Лень"};
+    // 7 локаций-башен. В каждой: коридор с 4 железными дверями -> 4 комнаты -> дверь СПУСК -> дорога ловушек вниз.
+    private static final int LOCS = 7;
+    private static final int HALL_COLS = 30;                              // ширина коридора в клетках
+    private static final int[] DOOR_COL = {5, 10, 15, 20};                // колонки 4 дверей в коридоре (ряд 3)
+    private static final int HALL_DOOR_ROW = 4;                           // клетка под дверью (куда возвращает из комнаты)
+    // Порядок локаций (двери открываются по очереди): 1 Гнев, 2 Алчность, 3 Зависть, 4 Похоть, 5 Чревоугодие, 6 Уныние, 7 Гордыня
+    private static final Theme[] SIN_THEMES = {Theme.WRATH, Theme.GREED, Theme.ENVY, Theme.LUST,
+            Theme.GLUTTONY, Theme.SLOTH, Theme.PRIDE};
+    private static final String[] SIN_NAMES = {"Гнев", "Алчность", "Зависть", "Похоть",
+            "Чревоугодие", "Уныние", "Гордыня"};
 
     private final GameWindow window;
     private final Map<String, Room> rooms = new HashMap<>();
@@ -65,6 +68,8 @@ public class GamePanel extends JPanel implements KeyListener {
     private int messageTimer;
     private int titleTimer;                               // заставка с названием комнаты
     private boolean won;                                  // прошёл всю игру
+    private final Sins sins = new Sins();                 // система грехов (Рай / Ад)
+    private Sins.Ending ending = Sins.Ending.HEAVEN;
 
     private Inventory inventory = new Inventory();
     private Item equipped;
@@ -113,20 +118,22 @@ public class GamePanel extends JPanel implements KeyListener {
         for (int c = c0; c <= c1; c++) r.traps.add(Trap.crumble(c, row));
     }
 
-    // Комната-грех с видом сбоку: слева зона испытания, потом ворота 'G', за ними дорога ловушек к выходу '2'.
-    private Room sin(int idx, MapBuilder b, String sub, Room.Goal goal, String label) {
+    // Комната-грех с видом сбоку: слева сцена с выбором (E / L), потом ворота 'G', за ними дорога ловушек к выходу '2'.
+    private Room sin(int idx, MapBuilder b, String sub, Decision choice, String story) {
         String name = SIN_NAMES[idx - 1];
         Room r = new Room(idx + ". " + name, b.build());
         r.sideView = true;
         r.theme = SIN_THEMES[idx - 1];
         r.title = name.toUpperCase();
         r.subtitle = sub;
-        r.goal = goal;
-        r.goalLabel = label;
+        r.goal = Room.Goal.CHOICE;
+        r.goalLabel = "сделай выбор";
         r.exitChar = '2';
-        r.exitLocked = goal != Room.Goal.NONE;
-        r.addDoor('1', "hall", HALL_COL[idx - 1], HALL_ROW[idx - 1]);
-        r.addDoor('2', "hall", HALL_COL[idx - 1], HALL_ROW[idx - 1]);
+        r.exitLocked = true;
+        r.choice = choice;
+        r.addSign(choice.col - 2, story);                     // табличка с историей рядом со сценой
+        r.addDoor('1', hallKey(idx), DOOR_COL[3], HALL_DOOR_ROW);
+        r.addDoor('2', hallKey(idx), DOOR_COL[3], HALL_DOOR_ROW);
         return r;
     }
 
@@ -136,184 +143,345 @@ public class GamePanel extends JPanel implements KeyListener {
     // платформа в ряду 8 = 2 клетки (предел прыжка), поэтому лестницы делаем шагами по 1 клетке.
     // Обычные ямы делаем шириной 1 клетка (их легко перепрыгнуть даже при замедлении), широкие — только с хрупким мостом.
     private void buildRooms() {
-        // ---------- ОБУЧЕНИЕ ----------
-        MapBuilder tb = MapBuilder.side(44);
-        tb.set(1, 9, '.');                        // назад дороги нет
-        tb.set(9, 9, '#');                        // блок в 1 клетку
-        pit(tb, 14, 14);                          // яма в 1 клетку
-        tb.set(19, 9, '^');                       // шипы
-        pit(tb, 29, 31);                          // яма под хрупким мостом
-        tb.rect(35, 9, 37, 9, 'V');               // три вазы
-        Room tut = new Room("Обучение", tb.build());
-        tut.sideView = true;
-        tut.theme = Theme.TUTORIAL;
-        tut.title = "ОБУЧЕНИЕ";
-        tut.subtitle = "Научись ходить, прыгать, избегать ловушек и бить мечом";
-        tut.goal = Room.Goal.CANDLE;
-        tut.goalLabel = "найди свечу";
-        tut.exitChar = '2';
-        tut.exitLocked = true;
-        tut.addDoor('2', "hall", 3, 5);
-        tut.traps.add(Trap.hidden(24, 9));
-        crumble(tut, 29, 31, 10);
-        tut.addSign(4, "A / D или стрелки — ходьба");
-        tut.addSign(7, "ПРОБЕЛ — прыжок. Перепрыгни блок впереди");
-        tut.addSign(12, "Яма! Упадёшь — потеряешь сердце. Прыгай через неё");
-        tut.addSign(17, "Шипы ранят — перепрыгивай их");
-        tut.addSign(22, "Ловушки бывают скрытыми: следи за трещинами в полу");
-        tut.addSign(27, "Хрупкий мост рушится под ногами — не задерживайся!");
-        tut.addSign(33, "E — безопасно проверить вазу, L — ударить мечом и разбить");
-        tut.addSign(40, "Свеча откроет выход. В обучении вазы штрафов не дают");
-        add("tutorial", tut);
-
-        // ---------- КОРИДОР 50 x 12: 7 дверей грехов, в конце — закрытая дверь 8 ----------
-        MapBuilder hb = new MapBuilder(50, 12, '#');
-        hb.rect(1, 4, 48, 7, '.');
-        for (int i = 0; i < 7; i++) hb.set(HALL_COL[i], i < 4 ? 3 : 8, (char) ('1' + i));
-        hb.set(49, 6, '8');
-        Room hall = new Room("Коридор", hb.build());
-        hall.theme = Theme.HALL;
-        hall.title = "ХРАМ СЕМИ ГРЕХОВ";
-        hall.subtitle = "Выбери дверь. Каждая ведёт к одному из грехов";
-        for (int i = 0; i < 7; i++) {
-            char c = (char) ('1' + i);
-            hall.addDoor(c, "s" + (i + 1), 3, 9);
-            hall.doorTint.put(c, SIN_THEMES[i].base);
-            hall.doorLabel.put(c, SIN_NAMES[i].toUpperCase());
+        // ---------- 7 ЛОКАЦИЙ: коридор + комнаты 1-3 + дорога спуска (4-я комната — грех, ниже) ----------
+        for (int loc = 1; loc <= LOCS; loc++) {
+            buildHall(loc);
+            for (int n = 1; n <= 3; n++) add(trialKey(loc, n), trial(loc, n));
+            add(roadKey(loc), road(loc));
         }
-        hall.addDoor('8', "END", 0, 0);
-        hall.doorTint.put('8', new Color(240, 200, 60));
-        hall.doorLabel.put('8', "ВЫХОД");
-        hall.exitChar = '8';
-        hall.exitLocked = true;
-        add("hall", hall);
 
-        // ---------- 1. ГОРДЫНЯ (синий + золото): взойди на башню и возьми корону ----------
-        MapBuilder b1 = MapBuilder.side(64);
-        plat(b1, 8, 9, 9);
-        plat(b1, 11, 12, 8);
-        plat(b1, 14, 15, 7);
-        plat(b1, 17, 18, 6);                      // выше — плиты хрупкие (гордыня падает)
-        b1.set(27, 2, 'K');
-        gate(b1, 38);
-        pit(b1, 45, 45);
-        b1.set(58, 9, '^');
-        Room r1 = sin(1, b1, "Взойди на башню и возьми корону. Верхние плиты хрупкие", Room.Goal.COLLECT, "возьми корону");
-        crumble(r1, 20, 21, 5);
-        crumble(r1, 23, 24, 4);
-        crumble(r1, 26, 27, 3);
-        hidden(r1, 42, 50, 60);
-        saw(r1, 52, 56);
+        // В каждой комнате: слева сцена с выбором (E — первый вариант, L — второй), потом ворота 'G' и дорога ловушек.
+
+        // ---------- 1. ГНЕВ (красный): тотем ярости ----------
+        MapBuilder b1 = MapBuilder.side(66);
+        b1.set(9, 9, '#');
+        gate(b1, 40);
+        pit(b1, 54, 54);
+        b1.set(61, 9, '^');
+        Room r1 = sin(1, b1, "Тотем ярости смотрит на тебя. Сломать его или сдержаться?",
+                new Decision(Decision.Kind.TOTEM, 33, 9,
+                        new Decision.Option("Сдержаться и пройти мимо", true, "Ты опустил меч. Ярость отпустила тебя."),
+                        new Decision.Option("Разбить тотем", false, "Тотем разбит, но гнев взял над тобой верх.")),
+                "Тотем ярости. Сдержись — или дай гневу волю");
+        flame(r1, 13, 0);
+        flame(r1, 22, 90);
+        flame(r1, 44, 0);
+        hidden(r1, 47);
+        flame(r1, 51, 70);
+        flame(r1, 58, 140);
         add("s1", r1);
 
-        // ---------- 2. ЖАДНОСТЬ (золотой): найди свечу среди ваз ----------
+        // ---------- 2. АЛЧНОСТЬ (золотой): сундук с золотом ----------
         MapBuilder b2 = MapBuilder.side(60);
-        b2.rect(11, 9, 18, 9, 'V');
-        b2.rect(12, 8, 17, 8, 'V');
+        b2.set(8, 9, '#');
+        pit(b2, 15, 15);
         gate(b2, 34);
         b2.set(47, 9, '^');
         pit(b2, 55, 55);
-        Room r2 = sin(2, b2, "Найди свечу среди ваз (E). Разбитая ваза проклинает", Room.Goal.CANDLE, "найди свечу среди ваз");
+        Room r2 = sin(2, b2, "Сундук с золотом. Украсть или пожертвовать?",
+                new Decision(Decision.Kind.CHEST, 25, 9,
+                        new Decision.Option("Пожертвовать монетку", true, "Ты отдал свою монетку. На душе стало легко."),
+                        new Decision.Option("Украсть золото", false, "Ты набил карманы золотом. Алчность прокляла тебя.")),
+                "Сундук с золотом. Хватит ли тебе того, что у тебя есть?");
         hidden(r2, 38, 43);
         saw(r2, 49, 53);
         add("s2", r2);
 
-        // ---------- 3. ГНЕВ (красный): разбей тотемы ярости ----------
-        MapBuilder b3 = MapBuilder.side(66);
-        b3.set(10, 9, 'T').set(18, 9, 'T').set(26, 9, 'T');
-        plat(b3, 28, 29, 9);
-        plat(b3, 31, 33, 8);
-        b3.set(32, 7, 'T');
-        gate(b3, 40);
-        pit(b3, 54, 54);
-        b3.set(61, 9, '^');
-        Room r3 = sin(3, b3, "Разбей 4 тотема мечом (L) — по 3 удара на каждый", Room.Goal.TOTEMS, "разбей тотемы");
-        flame(r3, 13, 0);
-        flame(r3, 22, 90);
-        flame(r3, 44, 0);
-        hidden(r3, 47);
-        flame(r3, 51, 70);
-        flame(r3, 58, 140);
+        // ---------- 3. ЗАВИСТЬ (зелёный): дочь ----------
+        MapBuilder b3 = MapBuilder.side(64);
+        b3.set(12, 9, '^');
+        pit(b3, 15, 15);
+        gate(b3, 38);
+        pit(b3, 41, 45);                          // пропасть под хрупким мостом
+        pit(b3, 57, 57);
+        Room r3 = sin(3, b3, "Её жизнь лучше твоей. Простить или поднять меч?",
+                new Decision(Decision.Kind.GIRL, 29, 9,
+                        new Decision.Option("Простить дочь", true, "Ты простил её. Зависть отступила."),
+                        new Decision.Option("Поднять меч на дочь", false, "Ты поднял меч на родную кровь. Зависть победила.")),
+                "Твоя дочь. Сможешь ли ты простить ей то, чего нет у тебя?");
+        hidden(r3, 8, 20, 24);
+        crumble(r3, 41, 45, 10);
+        hidden(r3, 49);
+        saw(r3, 51, 55);
         add("s3", r3);
 
-        // ---------- 4. ЗАВИСТЬ (зелёный): кот — спаси или отними ----------
-        MapBuilder b4 = MapBuilder.side(64);
+        // ---------- 4. ПОХОТЬ (розовый): встреча с тенью из прошлого ----------
+        MapBuilder b4 = MapBuilder.side(66);
         b4.set(12, 9, '^');
-        pit(b4, 15, 15);
-        plat(b4, 27, 31, 9);                      // возвышение, на котором сидит кот
-        b4.set(29, 8, 'C');
-        gate(b4, 38);
-        pit(b4, 41, 45);                          // пропасть под хрупким мостом
-        pit(b4, 57, 57);
-        Room r4 = sin(4, b4, "У кота есть то, чего нет у тебя. Спаси его (E) или отними силу (L)", Room.Goal.CAT, "реши судьбу кота");
-        hidden(r4, 8, 20, 24);
-        crumble(r4, 41, 45, 10);
-        hidden(r4, 49);
-        saw(r4, 51, 55);
+        pit(b4, 24, 27);
+        gate(b4, 39);
+        pit(b4, 50, 50);
+        Room r4 = sin(4, b4, "Тень из прошлого. Уйти или отомстить?",
+                new Decision(Decision.Kind.SHADOW, 33, 9,
+                        new Decision.Option("Уйти, не оглядываясь", true, "Ты не обернулся. Прошлое больше не держит тебя."),
+                        new Decision.Option("Отомстить", false, "Ты поддался злости. Прошлое снова держит тебя.")),
+                "Тот, кто причинил тебе боль, стоит перед тобой");
+        crumble(r4, 24, 27, 10);
+        flame(r4, 43, 0);
+        hidden(r4, 47);
+        saw(r4, 54, 58);
+        flame(r4, 61, 100);
         add("s4", r4);
 
-        // ---------- 5. ПОХОТЬ (розовый): три розы там, где опаснее всего ----------
-        MapBuilder b5 = MapBuilder.side(66);
-        b5.rect(10, 9, 11, 9, '^');
-        b5.set(12, 9, 'R');                       // роза 1: между двумя рядами шипов
-        b5.rect(13, 9, 14, 9, '^');
-        pit(b5, 24, 27);
-        b5.set(26, 9, 'R');                       // роза 2: на хрупком мосту
-        plat(b5, 30, 30, 9);
-        plat(b5, 32, 33, 8);
-        plat(b5, 35, 36, 7);
-        b5.set(36, 6, 'R');                       // роза 3: на верхней ступени
-        gate(b5, 39);
-        pit(b5, 50, 50);
-        Room r5 = sin(5, b5, "Соблазн ведёт в опасные места. Собери 3 розы", Room.Goal.COLLECT, "собери розы");
-        crumble(r5, 24, 27, 10);
-        flame(r5, 43, 0);
-        hidden(r5, 47);
-        saw(r5, 54, 58);
-        flame(r5, 61, 100);
+        // ---------- 5. ЧРЕВОУГОДИЕ (оранжевый): накрытый стол ----------
+        MapBuilder b5 = MapBuilder.side(64);
+        b5.set(10, 9, '^');
+        pit(b5, 24, 24);
+        gate(b5, 37);
+        pit(b5, 49, 49);
+        b5.set(56, 9, '^');
+        Room r5 = sin(5, b5, "Накрытый стол. Съесть всё или отказаться?",
+                new Decision(Decision.Kind.CAKE, 31, 9,
+                        new Decision.Option("Съесть всё", false, "Ты объелся и отяжелел. Чревоугодие прокляло тебя."),
+                        new Decision.Option("Разбить угощение", true, "Ты отказался от соблазна. Стало легче.")),
+                "Торт, пироги, сладости... Остановишься ли ты?");
+        hidden(r5, 40, 53);
+        saw(r5, 42, 46);
+        flame(r5, 59, 40);
         add("s5", r5);
 
-        // ---------- 6. ЧРЕВОУГОДИЕ (оранжевый): съешь всё угощение ----------
-        MapBuilder b6 = MapBuilder.side(64);
-        b6.set(8, 9, 'A');
-        b6.set(10, 9, '^');
-        b6.set(12, 9, 'A');
-        plat(b6, 14, 14, 9);
-        plat(b6, 16, 18, 8);
-        b6.set(17, 7, 'A');
-        b6.set(22, 9, 'A');
-        pit(b6, 24, 24);
-        b6.set(27, 9, 'A');
-        b6.set(33, 9, 'A');
-        gate(b6, 37);
-        pit(b6, 49, 49);
-        b6.set(56, 9, '^');
-        Room r6 = sin(6, b6, "Съешь всё угощение. Каждый кусок замедляет тебя", Room.Goal.COLLECT, "съешь угощение");
-        hidden(r6, 30, 40, 53);
-        saw(r6, 42, 46);
-        flame(r6, 59, 40);
+        // ---------- 6. УНЫНИЕ (серо-голубой): течение сна тянет назад ----------
+        MapBuilder b6 = MapBuilder.side(66);
+        b6.set(8, 9, '^');
+        pit(b6, 18, 18);
+        gate(b6, 36);
+        pit(b6, 43, 43);
+        b6.set(59, 9, '^');
+        Room r6 = sin(6, b6, "Тёплая постель и кошка. Уснуть или встряхнуться?",
+                new Decision(Decision.Kind.BED, 30, 9,
+                        new Decision.Option("Лечь спать с кошкой", false, "Ты уснул рядом с кошкой. Уныние победило."),
+                        new Decision.Option("Растрепать постель и встать", true, "Ты растрепал постель и вскочил. Кошка мяукнула.")),
+                "Так тепло... Может, поспать ещё немного?");
+        r6.wind = 1;
+        hidden(r6, 22, 47);
+        flame(r6, 39, 0);
+        saw(r6, 49, 53);
+        flame(r6, 56, 90);
         add("s6", r6);
 
-        // ---------- 7. ЛЕНЬ (серо-голубой): течение сна тянет назад, собери 3 сферы ----------
-        MapBuilder b7 = MapBuilder.side(66);
-        b7.set(8, 9, '^');
-        b7.set(12, 9, 'Z');
-        plat(b7, 15, 15, 9);
-        pit(b7, 18, 18);
-        b7.set(24, 9, 'Z');
-        plat(b7, 28, 28, 9);
-        plat(b7, 30, 31, 8);
-        b7.set(31, 7, 'Z');
-        gate(b7, 36);
-        pit(b7, 43, 43);
-        b7.set(59, 9, '^');
-        Room r7 = sin(7, b7, "Течение сна тянет назад. Собери 3 сферы снов", Room.Goal.COLLECT, "собери сферы снов");
-        r7.wind = 1;
-        hidden(r7, 22, 47);
-        flame(r7, 39, 0);
-        saw(r7, 49, 53);
-        flame(r7, 56, 90);
+        // ---------- 7. ГОРДЫНЯ (синий + золото): вся добыча ----------
+        MapBuilder b7 = MapBuilder.side(64);
+        b7.set(12, 9, '#');
+        pit(b7, 20, 20);
+        gate(b7, 38);
+        pit(b7, 45, 45);
+        b7.set(58, 9, '^');
+        Room r7 = sin(7, b7, "Вся твоя добыча перед тобой. Вернуть всё или оставить в прошлом?",
+                new Decision(Decision.Kind.ALTAR, 31, 9,
+                        new Decision.Option("Вернуть всё", true, "Ты вернул всё, что присвоил. Гордыня склонилась."),
+                        new Decision.Option("Оставить это в прошлом", false, "Ты сделал вид, что ничего не было. Гордыня цела.")),
+                "Всё, что ты когда-то взял себе. Признаешь ли ты это?");
+        hidden(r7, 42, 50, 60);
+        saw(r7, 52, 56);
         add("s7", r7);
+    }
+
+    // ====== КЛЮЧИ КОМНАТ ======
+    private static String hallKey(int loc)         { return "h" + loc; }
+    private static String roadKey(int loc)         { return "road" + loc; }
+    private static String trialKey(int loc, int n) { return n == 4 ? "s" + loc : "r" + loc + "_" + n; }   // 4-я комната = грех s1..s7
+    private static boolean isHall(Room r)          { return r != null && r.key != null && r.key.matches("h[1-7]"); }
+
+    // {локация, номер комнаты} по ключу комнаты-испытания; null — если это не испытание
+    private static int[] parseTrial(String key) {
+        if (key == null) return null;
+        if (key.matches("s[1-7]")) return new int[]{key.charAt(1) - '0', 4};
+        if (key.matches("r[1-7]_[1-3]")) return new int[]{key.charAt(1) - '0', key.charAt(3) - '0'};
+        return null;
+    }
+
+    private int roomsDone(int loc) {
+        int n = 0;
+        for (int i = 1; i <= 4; i++) if (done.contains(trialKey(loc, i))) n++;
+        return n;
+    }
+
+    // ====== КОРИДОР ЛОКАЦИИ: 4 железные двери по порядку + дверь СПУСК ======
+    private void buildHall(int loc) {
+        MapBuilder hb = new MapBuilder(HALL_COLS, 12, '#');
+        hb.rect(1, 4, HALL_COLS - 2, 7, '.');
+        for (int i = 0; i < 4; i++) hb.set(DOOR_COL[i], 3, (char) ('1' + i));
+        hb.set(HALL_COLS - 1, 6, '8');
+        Room hall = new Room("Коридор · " + SIN_NAMES[loc - 1], hb.build());
+        hall.theme = Theme.HALL;
+        hall.basement = true;                                  // кирпичные стены и железные двери (общее для всех локаций)
+        hall.title = "ЛОКАЦИЯ " + loc;
+        hall.subtitle = SIN_NAMES[loc - 1] + ": четыре железные двери открываются по порядку";
+        for (int i = 0; i < 4; i++) {
+            char c = (char) ('1' + i);
+            hall.addDoor(c, trialKey(loc, i + 1), 3, 9);
+            hall.doorTint.put(c, SIN_THEMES[loc - 1].base);
+            hall.doorLabel.put(c, "КОМНАТА " + (i + 1));
+        }
+        hall.addDoor('8', roadKey(loc), 3, 9);
+        hall.doorTint.put('8', new Color(240, 200, 60));
+        hall.doorLabel.put('8', "СПУСК");
+        hall.exitChar = '8';
+        hall.exitLocked = true;
+        add(hallKey(loc), hall);
+    }
+
+    // двери комнат открываются по порядку: доступна только следующая, остальные заперты (пройденные тоже)
+    private void refreshHallLocks(int loc) {
+        Room hall = rooms.get(hallKey(loc));
+        hall.lockedDoors.clear();
+        int next = roomsDone(loc);
+        for (int i = 0; i < 4; i++) if (i != next) hall.lockedDoors.add((char) ('1' + i));
+    }
+
+    // ====== ГЕНЕРАЦИЯ ДОРОГИ ЛОВУШЕК ======
+    private static final int T_PIT = 0, T_SPIKE = 1, T_BLOCK = 2, T_HIDDEN = 3, T_FLAME = 4, T_SAW = 5, T_BRIDGE = 6;
+
+    private int pickTrap(int level, Random rnd) {
+        int r = rnd.nextInt(100);
+        if (r < 25) return T_PIT;
+        if (r < 40) return T_SPIKE;
+        if (r < 50) return T_BLOCK;
+        if (r < 65) return T_HIDDEN;
+        if (r < 80) return level >= 2 ? T_FLAME : T_SPIKE;
+        if (r < 92) return level >= 3 ? T_SAW : T_HIDDEN;
+        return level >= 3 ? T_BRIDGE : T_PIT;
+    }
+
+    // план: {тип, колонка, случайное число (фаза огня)}. Между препятствиями всегда >= 3 свободных клеток — путь проходим.
+    private List<int[]> planRoad(int from, int to, int level, Random rnd) {
+        List<int[]> plan = new ArrayList<>();
+        int c = from;
+        while (true) {
+            int type = pickTrap(level, rnd);
+            int width = type == T_SAW ? 5 : type == T_BRIDGE ? 3 : 1;
+            if (c + width > to) break;
+            plan.add(new int[]{type, c, rnd.nextInt(200)});
+            c += width + Math.max(3, 6 - level / 2 + rnd.nextInt(2));
+        }
+        return plan;
+    }
+
+    private void applyRoadMap(MapBuilder b, List<int[]> plan) {
+        for (int[] t : plan) {
+            switch (t[0]) {
+                case T_PIT    -> pit(b, t[1], t[1]);
+                case T_SPIKE  -> b.set(t[1], 9, '^');
+                case T_BLOCK  -> b.set(t[1], 9, '#');
+                case T_BRIDGE -> pit(b, t[1], t[1] + 2);
+                default       -> { }
+            }
+        }
+    }
+
+    private void applyRoadTraps(Room r, List<int[]> plan) {
+        for (int[] t : plan) {
+            switch (t[0]) {
+                case T_HIDDEN -> hidden(r, t[1]);
+                case T_FLAME  -> flame(r, t[1], t[2]);
+                case T_SAW    -> saw(r, t[1], t[1] + 4);
+                case T_BRIDGE -> crumble(r, t[1], t[1] + 2, 10);
+                default       -> { }
+            }
+        }
+    }
+
+    // Комнаты 1-3 каждой локации: слева цель (свеча / предметы / тотемы), ворота 'G', дальше дорога ловушек к выходу.
+    // В одной локации три комнаты всегда с тремя разными целями; глубже — больше ловушек.
+    private Room trial(int loc, int n) {
+        int cols = 56 + loc * 2;
+        MapBuilder b = MapBuilder.side(cols);
+        Random rnd = new Random(loc * 1000L + n * 17L);
+        int kind = (loc + n) % 3;                              // 0 свеча, 1 сбор предметов, 2 тотемы
+        b.set(8, 9, '#');
+        if (loc >= 2) pit(b, 27, 27);
+        switch (kind) {
+            case 0 -> b.rect(14, 9, 13 + (loc >= 4 ? 4 : 3), 9, 'V');
+            case 1 -> {
+                char ch = loc % 2 == 1 ? 'Z' : 'R';
+                b.set(13, 9, ch);
+                b.set(18, 8, ch);
+                b.set(23, 9, ch);
+            }
+            default -> {
+                b.set(14, 9, 'T');
+                b.set(20, 9, 'T');
+                if (loc >= 4) b.set(25, 9, 'T');
+            }
+        }
+        gate(b, 30);
+        List<int[]> plan = planRoad(33, cols - 5, loc, rnd);
+        applyRoadMap(b, plan);
+
+        Room r = new Room(SIN_NAMES[loc - 1] + " · комната " + n, b.build());
+        r.sideView = true;
+        r.theme = SIN_THEMES[loc - 1];
+        r.title = SIN_NAMES[loc - 1].toUpperCase();
+        r.exitChar = '2';
+        r.exitLocked = true;
+        String hint;
+        switch (kind) {
+            case 0 -> {
+                r.goal = Room.Goal.CANDLE;
+                r.goalLabel = "найди свечу";
+                r.subtitle = "Комната " + n + " из 4: найди свечу среди ваз";
+                hint = "Свеча в одной из ваз. E — проверить (безопасно), L — разбить (штраф!)";
+            }
+            case 1 -> {
+                r.goal = Room.Goal.COLLECT;
+                r.goalLabel = "собери предметы";
+                r.subtitle = "Комната " + n + " из 4: собери все предметы";
+                hint = "Собери все светящиеся предметы — тогда откроются ворота";
+            }
+            default -> {
+                r.goal = Room.Goal.TOTEMS;
+                r.goalLabel = "разбей тотемы";
+                r.subtitle = "Комната " + n + " из 4: разбей тотемы мечом";
+                hint = "Тотемы разбиваются мечом: L, три удара на каждый";
+            }
+        }
+        if (loc == 1 && n == 1) {                              // первая комната — она же короткое обучение
+            r.addSign(4, "A / D или стрелки — ходьба");
+            r.addSign(6, "ПРОБЕЛ — прыжок. Перепрыгни блок впереди");
+        }
+        r.addSign(11, hint);
+        r.addDoor('1', hallKey(loc), DOOR_COL[n - 1], HALL_DOOR_ROW);
+        r.addDoor('2', hallKey(loc), DOOR_COL[n - 1], HALL_DOOR_ROW);
+        applyRoadTraps(r, plan);
+        return r;
+    }
+
+    // Дорога спуска между локациями: длинная дорога ловушек вниз. Назад дороги нет.
+    private Room road(int loc) {
+        int cols = 90 + loc * 4;
+        MapBuilder b = MapBuilder.side(cols);
+        b.set(1, 9, '.');
+        Random rnd = new Random(loc * 7777L);
+        List<int[]> plan = planRoad(6, cols - 5, Math.min(7, loc + 1), rnd);
+        applyRoadMap(b, plan);
+
+        Room r = new Room("Спуск · " + SIN_NAMES[loc - 1], b.build());
+        r.sideView = true;
+        r.theme = SIN_THEMES[loc - 1];
+        r.title = "СПУСК";
+        r.subtitle = loc < LOCS ? "Дорога ловушек вниз — к локации " + (loc + 1) : "Последний спуск — к самому дну";
+        r.goal = Room.Goal.NONE;
+        r.exitChar = '2';
+        r.exitLocked = false;
+        r.addDoor('2', loc < LOCS ? hallKey(loc + 1) : "END", 2, 5);
+        applyRoadTraps(r, plan);
+        return r;
+    }
+
+    // подсказка, если игрок стоит у запертой двери коридора
+    private String lockedDoorHint() {
+        if (!isHall(current)) return null;
+        int col = player.centerX() / Room.TILE, row = player.centerY() / Room.TILE;
+        for (int dc = -1; dc <= 1; dc++) {
+            for (int dr = -1; dr <= 1; dr++) {
+                char c = current.tileAt(col + dc, row + dr);
+                if (current.lockedDoors.contains(c)) {
+                    return current.doneDoors.contains(c) ? "Эта дверь уже пройдена"
+                            : "Дверь заперта: сначала пройди предыдущую комнату";
+                }
+            }
+        }
+        return null;
     }
 
     // ====== ЭФФЕКТЫ ======
@@ -347,8 +515,9 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private void smashVase(Vase v) {
         v.state = Vase.State.BROKEN;
-        boolean training = "tutorial".equals(current.key);   // в обучении штрафа нет
-        String curse = training ? "В обучении штрафа нет, но дальше он будет!" : applyCurse();
+        boolean training = current.key != null && current.key.startsWith("r1_");   // в первой локации штрафа нет
+        if (!training) sinDeed(false);
+        String curse = training ? "В первой локации штрафа нет, но дальше он будет!" : applyCurse();
         if (v.hasCandle) {
             giveCandle();
             showMessage("Ваза разбита, свеча найдена! " + (training ? curse : "Но: " + curse));
@@ -388,7 +557,7 @@ public class GamePanel extends JPanel implements KeyListener {
     // ====== ИНВЕНТАРЬ ======
     private void resetInventory() {
         inventory = new Inventory();
-        Item sword = Item.sword("Меч", "Урон 2. Твой первый меч", 2, new Color(210, 220, 235));
+        Item sword = Item.sword("Меч", "Урон 2. Закалённая сталь", 2, new Color(200, 215, 235));
         Item book = new Item(Item.Type.BOOK, "Книга", "Enter — открыть и записать инструкцию");
         book.text = loadBookText();
         inventory.add(sword);
@@ -476,15 +645,17 @@ public class GamePanel extends JPanel implements KeyListener {
         rooms.clear();
         done.clear();
         buildRooms();
+        for (int loc = 1; loc <= LOCS; loc++) refreshHallLocks(loc);
         pet = null;
         slowTimer = poisonTimer = darkTimer = weakTimer = 0;
         slowPermanent = false;
         checkTimer = 0;
         checkVase = null;
         won = false;
+        sins.reset();
         respawnCol = 3;
         respawnRow = 9;
-        enterRoom(rooms.get("tutorial"));
+        enterRoom(rooms.get(trialKey(1, 1)));
         player.setTile(respawnCol, respawnRow);
         player.hp = player.maxHp;
         player.facing = Player.Dir.RIGHT;
@@ -498,7 +669,7 @@ public class GamePanel extends JPanel implements KeyListener {
         resetInventory();
         invOpen = false;
         snapCamera();
-        showMessage("Обучение: иди вправо и читай таблички. Прыжок — ПРОБЕЛ, меч — L");
+        showMessage("Ты в первой комнате. Иди вправо, читай таблички. Прыжок — ПРОБЕЛ, меч — L");
         timer.start();
     }
 
@@ -673,6 +844,12 @@ public class GamePanel extends JPanel implements KeyListener {
         player.attackTimer = Player.ATTACK_FRAMES;
         player.attackCooldown = ATTACK_COOLDOWN;
 
+        Decision near = nearChoice();                           // L — второй вариант выбора
+        if (near != null) {
+            resolveChoice(near, near.optL);
+            return;
+        }
+
         int fx = player.facing == Player.Dir.RIGHT ? 1 : player.facing == Player.Dir.LEFT ? -1 : 0;
         int fy = player.facing == Player.Dir.DOWN ? 1 : player.facing == Player.Dir.UP ? -1 : 0;
         Rectangle hit = new Rectangle(player.centerX() + fx * 34 - 30, player.centerY() + fy * 34 - 30, 60, 60);
@@ -700,6 +877,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private void killCat(Cat c) {
         c.state = Cat.State.DEAD;
+        sinDeed(false);
         current.cat = null;
         slowPermanent = true;                                 // постоянное замедление
         Item reward = Item.sword("Тёмный меч", "Урон 4. Достался тебе от кота", 4, new Color(150, 90, 220));
@@ -708,6 +886,51 @@ public class GamePanel extends JPanel implements KeyListener {
         } else {
             showMessage("Инвентарь полон, меч потерян. Замедление осталось навсегда. Ворота открыты");
         }
+    }
+
+    // поступок в текущей комнате. Для других испытаний вызывай так же: sinDeed(false) — плохой, sinDeed(true) — хороший
+    private void sinDeed(boolean good) {
+        if (good) sins.good(current.key);
+        else if (sins.bad(current.key)) System.out.println("Плохих поступков: " + sins.badCount());
+    }
+
+    // ближайший невыбранный «выбор» в радиусе действия
+    private Decision nearChoice() {
+        Decision c = current.choice;
+        if (c == null || c.decided) return null;
+        return Math.hypot(c.centerX() - player.centerX(), c.centerY() - player.centerY()) < 80 ? c : null;
+    }
+
+    // забирает монетку из инвентаря (для пожертвования); false — монетки нет
+    private boolean takeCoin() {
+        for (int i = 0; i < Inventory.SLOTS; i++) {
+            Item it = inventory.get(i);
+            if (it != null && it.type == Item.Type.COIN) {
+                inventory.remove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // игрок выбрал вариант: засчитываем добрый / плохой поступок, открываем ворота
+    private void resolveChoice(Decision c, Decision.Option opt) {
+        if (c.decided) return;
+        if (c.kind == Decision.Kind.CHEST && opt.good() && !takeCoin()) {
+            showMessage("У тебя нет монетки, чтобы пожертвовать");
+            return;
+        }
+        c.pick(opt);
+        sinDeed(opt.good());
+        String effect;
+        if (opt.good()) {
+            player.hp = player.maxHp;
+            effect = "Чистая совесть: сердца восстановлены";
+        } else {
+            effect = applyCurse();
+        }
+        unlockExit(null);
+        showMessage(opt.result() + "\n" + effect);
     }
 
     private boolean nearCat() {
@@ -726,11 +949,17 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private void interact() {
         if (invOpen || won || checkTimer > 0) return;
+        Decision ch = nearChoice();
+        if (ch != null) {                                     // E — первый вариант выбора
+            resolveChoice(ch, ch.optE);
+            return;
+        }
         if (nearCat()) {                                      // спасти кота: он садится на плечи
             Cat c = current.cat;
             c.state = Cat.State.FOLLOWING;
             c.onShoulder = true;
             pet = c;
+            sinDeed(true);
             current.cat = null;
             showMessage("Ты спас кота. Он сидит у тебя на плечах. Мяу! Ворота открыты");
             return;
@@ -777,18 +1006,24 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // вызывается, когда игрок выходит через открытую дверь-выход
     private void onRoomCompleted(Room r) {
-        if ("tutorial".equals(r.key)) {
-            showMessage("Обучение пройдено! Выбирай любую из 7 дверей — каждая ведёт к греху");
+        if (r.key != null && r.key.startsWith("road")) {          // спустился в следующую локацию
+            int loc = r.key.charAt(4) - '0';
+            if (loc < LOCS) showMessage("Ты спустился глубже: локация " + (loc + 1));
             return;
         }
-        if (r.key == null || !r.key.matches("s[1-7]") || !done.add(r.key)) return;
-        Room hall = rooms.get("hall");
-        hall.doneDoors.add(r.key.charAt(1));
-        if (done.size() == 7) {
+        int[] id = parseTrial(r.key);
+        if (id == null || !done.add(r.key)) return;
+        int loc = id[0];
+        Room hall = rooms.get(hallKey(loc));
+        hall.doneDoors.add((char) ('0' + id[1]));
+        sins.good(r.key);                                          // для комнат-грехов (s1..s7); для остальных ничего не делает
+        refreshHallLocks(loc);
+        int n = roomsDone(loc);
+        if (n == 4) {
             hall.exitLocked = false;
-            showMessage("Все 7 грехов побеждены! В конце коридора открылась дверь");
+            showMessage("Локация пройдена! В конце коридора открыта дверь СПУСК");
         } else {
-            showMessage("Грех побеждён (" + done.size() + "/7)");
+            showMessage("Комната пройдена (" + n + "/4). Откроется следующая дверь");
         }
     }
 
@@ -800,6 +1035,7 @@ public class GamePanel extends JPanel implements KeyListener {
         if (door != null) {
             if (t == current.exitChar && !current.exitLocked) onRoomCompleted(current);
             if (door.targetRoom().equals("END")) {                // последняя дверь
+                ending = sins.ending();
                 won = true;
                 up = down = left = right = jump = false;
                 return;
@@ -922,17 +1158,62 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     private void drawVictory(Graphics2D g) {
-        g.setColor(new Color(0, 0, 0, 200));
-        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
-        g.setFont(new Font("Monospaced", Font.BOLD, 60));
-        g.setColor(new Color(240, 200, 60));
-        drawCentered(g, "ПОБЕДА!", 240);
-        g.setFont(new Font("Monospaced", Font.BOLD, 20));
-        g.setColor(Color.WHITE);
-        drawCentered(g, "Ты победил все 7 грехов", 290);
+        boolean heaven = ending == Sins.Ending.HEAVEN;
+        int W = Room.VIEW_W, H = Room.VIEW_H, cx = W / 2;
+
+        g.setPaint(heaven ? new GradientPaint(0, 0, new Color(255, 250, 215), 0, H, new Color(150, 200, 255))
+                : new GradientPaint(0, 0, new Color(20, 0, 0), 0, H, new Color(170, 30, 10)));
+        g.fillRect(0, 0, W, H);
+
+        if (heaven) {                                                    // лучи света и фигура бога
+            g.setColor(new Color(255, 255, 255, 70));
+            for (int i = -3; i <= 3; i++)
+                g.fillPolygon(new int[]{cx, cx + i * 90 - 30, cx + i * 90 + 30}, new int[]{40, H, H}, 3);
+            g.setColor(new Color(255, 230, 120));
+            g.fillOval(cx - 40, 56, 80, 14);                             // нимб
+            g.setColor(new Color(250, 225, 195));
+            g.fillRect(cx - 18, 76, 36, 34);                             // голова
+            g.setColor(new Color(235, 235, 235));
+            g.fillRect(cx - 26, 70, 52, 12);                             // волосы и борода
+            g.fillRect(cx - 18, 100, 36, 24);
+            g.setColor(Color.WHITE);
+            g.fillRect(cx - 40, 122, 80, 120);                           // одеяние
+            g.fillRect(cx - 100, 128, 60, 24);
+            g.fillRect(cx + 40, 128, 60, 24);
+            g.setColor(Color.BLACK);
+            g.fillRect(cx - 10, 90, 4, 4);
+            g.fillRect(cx + 6, 90, 4, 4);
+        } else {                                                         // демон
+            g.setColor(new Color(40, 0, 0));
+            g.fillRect(0, H - 70, W, 70);
+            g.setColor(new Color(255, 120, 20));
+            for (int i = 0; i < 12; i++) g.fillRect(i * 90 + 10, H - 70 - (i * 37 % 30), 40, 30);
+            g.setColor(new Color(120, 15, 25));
+            g.fillRect(cx - 40, 110, 80, 130);                           // тело
+            g.fillRect(cx - 30, 56, 60, 56);                             // голова
+            g.setColor(new Color(240, 230, 200));
+            g.fillPolygon(new int[]{cx - 30, cx - 52, cx - 16}, new int[]{62, 20, 56}, 3);     // рога
+            g.fillPolygon(new int[]{cx + 30, cx + 52, cx + 16}, new int[]{62, 20, 56}, 3);
+            g.setColor(new Color(255, 220, 40));
+            g.fillRect(cx - 20, 76, 14, 8);
+            g.fillRect(cx + 6, 76, 14, 8);
+            g.setColor(Color.BLACK);
+            g.fillRect(cx - 16, 100, 32, 6);
+            g.setColor(new Color(120, 15, 25));
+            g.fillRect(cx - 110, 120, 70, 20);
+            g.fillRect(cx + 40, 120, 70, 20);
+        }
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 56));
+        g.setColor(heaven ? new Color(60, 90, 160) : new Color(255, 200, 60));
+        drawCentered(g, heaven ? "РАЙ" : "АД", 300);
+        g.setFont(new Font("Monospaced", Font.BOLD, 18));
+        g.setColor(heaven ? new Color(40, 60, 110) : Color.WHITE);
+        drawCentered(g, "Добрых: " + sins.goodCount() + "   Плохих: " + sins.badCount()
+                + "   (Рай — от " + Sins.HEAVEN_LIMIT + " добрых, Ад — от " + Sins.HELL_LIMIT + " плохих)", 340);
         g.setFont(new Font("Monospaced", Font.PLAIN, 16));
-        g.setColor(new Color(190, 200, 225));
-        drawCentered(g, "Enter / ESC — в меню", 330);
+        g.setColor(heaven ? new Color(40, 60, 110) : new Color(230, 200, 190));
+        drawCentered(g, "Enter / ESC — в меню", 380);
     }
 
     private void drawHeart(Graphics2D g, int x, int y, boolean full) {
@@ -963,16 +1244,18 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private String objectiveText() {
         Room r = current;
-        if ("hall".equals(r.key)) {
-            return r.exitLocked ? "Цель: победи 7 грехов (" + done.size() + "/7)"
-                    : "Цель: иди в дверь ВЫХОД в конце коридора";
+        if (isHall(r)) {
+            return r.exitLocked ? "Цель: пройди 4 комнаты по порядку (" + roomsDone(r.key.charAt(1) - '0') + "/4)"
+                    : "Цель: спустись — дверь СПУСК в конце коридора";
         }
+        if (r.key != null && r.key.startsWith("road")) return "Цель: пройди дорогу ловушек и спустись глубже";
         String open = r.gateCol >= 0 ? "Ворота открыты — пройди ловушки к выходу" : "Выход справа открыт";
         return switch (r.goal) {
             case CANDLE  -> r.exitLocked ? "Цель: найди свечу среди ваз" : open;
             case COLLECT -> r.exitLocked ? "Цель: " + r.goalLabel + " (" + r.takenCount() + "/" + r.pickups.size() + ")" : open;
             case TOTEMS  -> r.exitLocked ? "Цель: разбей тотемы (осталось " + r.totemsLeft() + ")" : open;
             case CAT     -> r.exitLocked ? "Цель: спаси кота (E) или убей его (L)" : open;
+            case CHOICE  -> r.exitLocked ? "Цель: сделай выбор (E или L)" : open;
             default      -> "Цель: дойди до выхода справа";
         };
     }
@@ -1013,15 +1296,25 @@ public class GamePanel extends JPanel implements KeyListener {
         if (weakTimer > 0) fx.add("Слабость " + (weakTimer / 60 + 1) + "с");
         for (String s : fx) { drawRight(g, s, ey); ey += 16; }
 
-        if (messageTimer > 0) drawBanner(g, message, Room.VIEW_H - 70, new Color(120, 140, 190));
+        if (messageTimer > 0) {                                // сообщение сверху (чтобы не закрывать сцену): строки разделены \n
+            String[] lines = message.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                drawBanner(g, lines[i], 150 + i * 36, new Color(120, 140, 190));
+            }
+        }
         if (!invOpen) {
             Room.Sign sign = nearSign();
             if (sign != null) drawBanner(g, sign.text(), 108, current.theme.accent);
-            if (nearCat()) {
+            Decision nc = nearChoice();
+            if (nc != null) {
+                drawBanner(g, "E — " + nc.optE.label() + "      L — " + nc.optL.label(), Room.VIEW_H - 24, current.theme.accent);
+            } else if (nearCat()) {
                 drawBanner(g, "E — спасти кота      L — ударить мечом", Room.VIEW_H - 24, new Color(240, 200, 60));
             } else if (checkTimer == 0 && nearVase() != null) {
                 drawBanner(g, "E — проверить (безопасно)      L — разбить (штраф!)", Room.VIEW_H - 24, new Color(240, 200, 60));
             }
+            String lockHint = lockedDoorHint();
+            if (lockHint != null) drawBanner(g, lockHint, Room.VIEW_H - 24, new Color(200, 80, 80));
         }
     }
 
@@ -1096,15 +1389,10 @@ public class GamePanel extends JPanel implements KeyListener {
         } else if (it.type == Item.Type.SWORD) {
             AffineTransform old = g.getTransform();
             g.translate(cx, cy);
-            g.rotate(Math.PI / 4);
-            g.setColor(it.blade);
-            g.fillRect(-3, -26, 6, 34);
-            g.setColor(Color.WHITE);
-            g.fillRect(-3, -26, 2, 34);
-            g.setColor(new Color(240, 200, 60));
-            g.fillRect(-10, 8, 20, 4);
-            g.setColor(new Color(120, 80, 40));
-            g.fillRect(-2, 12, 4, 10);
+            g.rotate(-Math.PI / 4);
+            g.scale(0.85, 0.85);
+            g.translate(-30, 0);
+            SwordArt.draw(g, it.blade);
             g.setTransform(old);
         } else if (it.type == Item.Type.CANDLE) {
             g.setColor(new Color(240, 235, 215));

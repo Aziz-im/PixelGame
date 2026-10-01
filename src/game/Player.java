@@ -2,6 +2,7 @@ package game;
 
 import java.awt.*;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Arc2D;
 
 public class Player extends Entity {
     public enum Dir { DOWN, UP, LEFT, RIGHT }
@@ -59,18 +60,19 @@ public class Player extends Entity {
             double t = 1.0 - attackTimer / (double) ATTACK_FRAMES;   // 0..1
             double angle = base - 1.1 + 2.2 * t;
             AffineTransform old = g.getTransform();
+            Stroke oldStroke = g.getStroke();
             g.translate(centerX(), y + h - 22);
+            double swept = Math.toDegrees(2.2 * t);                   // сколько дуги уже прошёл клинок
+            double startDeg = -Math.toDegrees(angle);
+            g.setStroke(new BasicStroke(26f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+            g.setColor(new Color(225, 238, 255, 60));                 // широкий шлейф взмаха
+            g.draw(new Arc2D.Double(-40, -40, 80, 80, startDeg, swept, Arc2D.OPEN));
+            g.setStroke(new BasicStroke(4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+            g.setColor(new Color(255, 255, 255, 150));                // яркая кромка у острия
+            g.draw(new Arc2D.Double(-54, -54, 108, 108, startDeg, swept, Arc2D.OPEN));
+            g.setStroke(oldStroke);
             g.rotate(angle);
-            g.setColor(new Color(230, 240, 255, 90));                 // след взмаха
-            g.fillRect(10, -14, 34, 28);
-            g.setColor(blade);                                        // клинок
-            g.fillRect(12, -3, 32, 6);
-            g.setColor(Color.WHITE);
-            g.fillRect(12, -3, 32, 2);
-            g.setColor(new Color(240, 200, 60));                      // гарда
-            g.fillRect(9, -8, 3, 16);
-            g.setColor(new Color(120, 80, 40));                       // рукоять
-            g.fillRect(2, -2, 7, 4);
+            SwordArt.draw(g, blade);
             g.setTransform(old);
         }
     }

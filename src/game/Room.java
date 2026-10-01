@@ -21,7 +21,8 @@ public class Room {
     //  CAT     — спасти или убить кота
     //  COLLECT — собрать все предметы (корона, розы, угощение, сферы)
     //  TOTEMS  — разбить все тотемы мечом
-    public enum Goal { NONE, CANDLE, CAT, COLLECT, TOTEMS }
+    //  CHOICE  — сделать выбор (E / L): добрый или плохой поступок
+    public enum Goal { NONE, CANDLE, CAT, COLLECT, TOTEMS, CHOICE }
 
     // табличка с подсказкой (для обучения)
     public record Sign(int col, int row, String text) {}
@@ -42,6 +43,9 @@ public class Room {
     public final Set<Character> doneDoors = new HashSet<>();   // двери, за которыми испытание пройдено
     public Cat cat;                                  // кот этой комнаты (если он тут есть)
     public boolean sideView;                         // true = вид сбоку (платформер)
+    public Decision choice;                            // выбор «добро / зло» в комнате греха
+    public boolean basement;                         // подвал: кирпичные стены и железные двери
+    public final Set<Character> lockedDoors = new HashSet<>();   // двери, которые пока заперты (коридор)
 
     public Theme theme = Theme.TUTORIAL;             // цвет и атмосфера локации
     public String title, subtitle;                   // заставка при входе
@@ -130,7 +134,8 @@ public class Room {
     // 'G' — ворота: твёрдые, пока не выполнена цель
     private boolean solidChar(char c) {
         return c == '#' || c == 'r' || c == 'b' || c == 'a' || c == 'F'
-                || (exitLocked && (c == exitChar || c == 'G'));
+                || (exitLocked && (c == exitChar || c == 'G'))
+                || lockedDoors.contains(c);
     }
 
     public boolean isSolid(int px, int py) {
@@ -182,8 +187,9 @@ public class Room {
                         case 'G' -> { if (exitLocked) drawGate(g, x, y, tick); }
                         default -> {
                             if (Character.isDigit(c)) {
-                                drawDoor(g, x, y, doneDoors.contains(c), doorTint.get(c));
-                                if (c == exitChar && exitLocked) drawLock(g, x, y);
+                                if (basement) drawIronDoor(g, x, y, doneDoors.contains(c), doorTint.get(c));
+                                else drawDoor(g, x, y, doneDoors.contains(c), doorTint.get(c));
+                                if ((c == exitChar && exitLocked) || (lockedDoors.contains(c) && !doneDoors.contains(c))) drawLock(g, x, y);
                                 String label = doorLabel.get(c);
                                 if (label != null) drawDoorLabel(g, label, x, y, col, row, doneDoors.contains(c));
                             }
@@ -197,6 +203,7 @@ public class Room {
         for (Sign s : signs) drawSign(g, s);
         for (Totem t : totems) t.draw(g, tick);
         for (Vase v : vases) v.draw(g, tick);
+        if (choice != null) choice.draw(g, tick);
         for (Pickup p : pickups) p.draw(g, tick);
     }
 
@@ -368,6 +375,7 @@ public class Room {
 
     // ---------- вид сверху ----------
     private void drawFloor(Graphics2D g, int x, int y, int col, int row) {
+        if (basement) { drawBasementFloor(g, x, y, col, row); return; }
         g.setColor((col + row) % 2 == 0 ? new Color(46, 64, 92) : new Color(42, 60, 86));
         g.fillRect(x, y, TILE, TILE);
         g.setColor(new Color(33, 48, 70));                        // швы кладки
@@ -404,6 +412,7 @@ public class Room {
     }
 
     private void drawWall(Graphics2D g, int x, int y, int col, int row) {
+        if (basement) { drawBrickWall(g, x, y, col, row); return; }
         g.setColor(new Color(26, 38, 58));
         g.fillRect(x, y, TILE, TILE);
         g.setColor(new Color(36, 52, 78));
@@ -519,6 +528,68 @@ public class Room {
         g.drawString(text, x + TILE / 2 - w / 2 + 1, ty + 1);
         g.setColor(done ? new Color(120, 235, 140) : Color.WHITE);
         g.drawString(text, x + TILE / 2 - w / 2, ty);
+    }
+
+    // ---------- подвал: кирпичные стены, каменный пол, железные двери ----------
+    private void drawBrickWall(Graphics2D g, int x, int y, int col, int row) {
+        g.setColor(new Color(38, 28, 28));                         // раствор между кирпичами
+        g.fillRect(x, y, TILE, TILE);
+        for (int i = 0; i < 4; i++) {                              // 4 ряда кирпичей по 12 px
+            int off = ((row * 4 + i) % 2) * 12;
+            for (int j = -1; j < 3; j++) {
+                int bx = x + j * 24 + off;
+                int tone = ((col * 7 + row * 13 + i * 5 + j * 3) % 3 + 3) % 3 * 8;
+                g.setColor(new Color(112 + tone, 52 + tone / 2, 42 + tone / 2));
+                int x0 = Math.max(bx + 1, x), x1 = Math.min(bx + 23, x + TILE);
+                if (x1 > x0) g.fillRect(x0, y + i * 12 + 1, x1 - x0, 10);
+            }
+        }
+        if (tileAt(col, row - 1) != '#') {                         // светлая верхняя грань стены
+            g.setColor(new Color(150, 92, 72));
+            g.fillRect(x, y, TILE, 3);
+        }
+    }
+
+    private void drawBasementFloor(Graphics2D g, int x, int y, int col, int row) {
+        g.setColor((col + row) % 2 == 0 ? new Color(60, 56, 58) : new Color(54, 50, 52));
+        g.fillRect(x, y, TILE, TILE);
+        g.setColor(new Color(36, 32, 34));                         // швы плит
+        g.fillRect(x, y, TILE, 2);
+        g.fillRect(x, y, 2, TILE);
+        if ((col * 7 + row * 13) % 5 == 0) {                       // сырое пятно
+            g.setColor(new Color(40, 46, 52));
+            g.fillOval(x + 12, y + 14, 22, 12);
+        }
+    }
+
+    // железная дверь: стальная плита, решётка-окошко, заклёпки; цветная лампа над ней показывает грех
+    private void drawIronDoor(Graphics2D g, int x, int y, boolean done, Color tint) {
+        if (tint != null) {
+            g.setColor(Theme.alpha(tint, 70));
+            g.fillRect(x - 4, y - 4, TILE + 8, TILE + 8);
+        }
+        g.setColor(new Color(34, 38, 46));
+        g.fillRect(x + 2, y + 2, TILE - 4, TILE - 2);              // рама
+        g.setColor(new Color(92, 100, 112));
+        g.fillRect(x + 6, y + 6, TILE - 12, TILE - 8);             // плита
+        g.setColor(tint != null ? tint : new Color(120, 130, 144));
+        g.fillRect(x + 6, y + 6, TILE - 12, 3);                    // полоса цвета греха
+        g.setColor(new Color(60, 66, 78));
+        g.fillRect(x + TILE / 2 - 1, y + 10, 2, TILE - 12);        // шов створок
+        g.setColor(new Color(14, 14, 20));
+        g.fillRect(x + 14, y + 13, 20, 10);                        // окошко
+        g.setColor(new Color(150, 158, 170));
+        for (int i = 0; i < 3; i++) g.fillRect(x + 18 + i * 6, y + 13, 2, 10);   // прутья
+        for (int i = 0; i < 2; i++) {                              // заклёпки
+            g.fillRect(x + 9, y + 29 + i * 9, 3, 3);
+            g.fillRect(x + TILE - 12, y + 29 + i * 9, 3, 3);
+        }
+        g.setColor(new Color(240, 200, 60));
+        g.fillRect(x + TILE / 2 + 5, y + TILE / 2 + 2, 4, 6);      // ручка
+        if (done) {                                                // зелёная отметка: испытание пройдено
+            g.setColor(new Color(90, 220, 120));
+            g.fillOval(x + TILE / 2 - 5, y + 26, 10, 10);
+        }
     }
 
     private void drawLock(Graphics2D g, int x, int y) {
