@@ -14,7 +14,7 @@ public class MenuPanel extends JPanel {
         box.setOpaque(false);
         box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
 
-        JLabel title = new JLabel("МОЯ ИГРА");
+        JLabel title = new JLabel("Семь смертных грехов");
         title.setFont(new Font("Monospaced", Font.BOLD, 56));
         title.setForeground(new Color(240, 200, 60));
         title.setAlignmentX(Component.CENTER_ALIGNMENT);

@@ -9,7 +9,7 @@ public class Player extends Entity {
     public static final int ATTACK_FRAMES = 14;
 
     // палитра героини: тёмно-фиолетовые волосы, красно-чёрная одежда, оранжевые ботинки
-    private static final Color HAIR = new Color(34, 24, 58), HAIR_HI = new Color(78, 54, 120);
+    private static final Color HAIR = new Color(245, 202, 3), HAIR_HI = new Color(245, 202, 3);
     private static final Color SKIN = new Color(236, 196, 174);
     private static final Color RED = new Color(198, 46, 64), RED_DARK = new Color(128, 26, 46);
     private static final Color DARK = new Color(30, 24, 40), GOLD = new Color(238, 184, 64);
