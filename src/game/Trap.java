@@ -7,29 +7,47 @@ import java.awt.*;
 //  CRUMBLE       — хрупкая плита: рушится, если на ней постоять, потом возвращается
 //  SAW           — пила ездит туда-сюда по полу
 //  FLAME         — струя огня из пола по таймеру (сначала искры — предупреждение)
+//  ARROW         — стрелострел: торчит из стены/блока, мигает (предупреждение) и пускает стрелу по прямой
 public class Trap {
-    public enum Type { HIDDEN_SPIKES, CRUMBLE, SAW, FLAME }
+    public enum Type { HIDDEN_SPIKES, CRUMBLE, SAW, FLAME, ARROW }
 
     private static final int T = Room.TILE;
 
     public final Type type;
     public final int col, row;
     public final int col2;            // для пилы: где заканчивается путь
-    public final int offset;          // сдвиг фазы (для огня)
+    public final int offset;          // сдвиг фазы (для огня и стрел)
+    public final int dx, dy, range;   // для стрелы: направление полёта и дальность в клетках
     private int state, timer;
 
-    private Trap(Type type, int col, int row, int col2, int offset) {
+    private Trap(Type type, int col, int row, int col2, int offset, int dx, int dy, int range) {
         this.type = type;
         this.col = col;
         this.row = row;
         this.col2 = col2;
         this.offset = offset;
+        this.dx = dx;
+        this.dy = dy;
+        this.range = range;
+    }
+
+    private Trap(Type type, int col, int row, int col2, int offset) {
+        this(type, col, row, col2, offset, 0, 0, 0);
     }
 
     public static Trap hidden(int col, int row)               { return new Trap(Type.HIDDEN_SPIKES, col, row, col, 0); }
     public static Trap crumble(int col, int row)              { return new Trap(Type.CRUMBLE, col, row, col, 0); }
     public static Trap saw(int colA, int colB, int row)       { return new Trap(Type.SAW, colA, row, colB, 0); }
     public static Trap flame(int col, int row, int offset)    { return new Trap(Type.FLAME, col, row, col, offset); }
+
+    // стрелострел в клетке (col,row); (dx,dy) — куда летит стрела: (0,1) вниз, (0,-1) вверх, (-1,0) влево, (1,0) вправо
+    public static Trap arrow(int col, int row, int dx, int dy, int range, int offset) {
+        return new Trap(Type.ARROW, col, row, col, offset, dx, dy, range);
+    }
+
+    // какие колонки «заняты» ловушкой (для стрелы — вся трасса полёта)
+    public int minCol() { return type == Type.ARROW && dx < 0 ? col - range : col; }
+    public int maxCol() { return type == Type.ARROW && dx > 0 ? col + range : col2; }
 
     // хрупкая плита твёрдая, пока не рухнула
     public boolean solidAt(int c, int r) {
@@ -75,9 +93,30 @@ public class Trap {
         return t < 110 ? 0 : t < 140 ? 1 : 2;
     }
 
+    private static final int ARROW_PERIOD = 170, ARROW_WARN = 100, ARROW_FLY = 130;   // 100..130 — мигает, 130..170 — летит
+
+    private int arrowPhase(int tick) {              // 0 — тихо, 1 — предупреждение, 2 — стрела в полёте
+        int t = (tick + offset) % ARROW_PERIOD;
+        return t < ARROW_WARN ? 0 : t < ARROW_FLY ? 1 : 2;
+    }
+
+    // центр летящей стрелы в этот кадр
+    private Point arrowPos(int tick) {
+        int t = (tick + offset) % ARROW_PERIOD - ARROW_FLY;                 // 0..39
+        double dist = Math.max(0, Math.min(1, t / (double) (ARROW_PERIOD - ARROW_FLY))) * range * T;
+        int sx = dx != 0 ? (col + (dx > 0 ? 1 : 0)) * T : col * T + T / 2;
+        int sy = dy != 0 ? (row + (dy > 0 ? 1 : 0)) * T : row * T + 34;
+        return new Point(sx + (int) (dx * dist), sy + (int) (dy * dist));
+    }
+
     // опасная зона в этот кадр (или null, если сейчас безопасно)
     public Rectangle hazard(int tick) {
         return switch (type) {
+            case ARROW -> {
+                if (arrowPhase(tick) != 2) yield null;
+                Point a = arrowPos(tick);
+                yield dx != 0 ? new Rectangle(a.x - 16, a.y - 6, 32, 12) : new Rectangle(a.x - 10, a.y - 16, 20, 32);
+            }
             case HIDDEN_SPIKES -> state == 2 ? new Rectangle(col * T + 6, row * T + 12, 36, 36) : null;
             case SAW -> { int cx = sawX(tick), cy = row * T + 32; yield new Rectangle(cx - 15, cy - 15, 30, 30); }
             case FLAME -> flamePhase(tick) == 2 ? new Rectangle(col * T + 10, (row - 2) * T, 28, 3 * T) : null;
@@ -92,6 +131,42 @@ public class Trap {
             case CRUMBLE -> drawCrumble(g, tick, th);
             case SAW -> drawSaw(g, tick, th);
             case FLAME -> drawFlame(g, tick);
+            case ARROW -> drawArrow(g, tick, th);
+        }
+    }
+
+    // стрелострел: каменная плита с бойницей в сторону полёта; перед выстрелом бойница светится
+    private void drawArrow(Graphics2D g, int tick, Theme th) {
+        int x = col * T, y = row * T;
+        int ph = arrowPhase(tick);
+        g.setColor(new Color(34, 30, 38));
+        g.fillRect(x + 5, y + 5, T - 10, T - 10);
+        g.setColor(new Color(70, 64, 78));
+        g.fillRect(x + 5, y + 5, T - 10, 3);
+        g.setColor(new Color(150, 154, 168));                          // заклёпки
+        g.fillRect(x + 8, y + 8, 3, 3);
+        g.fillRect(x + T - 11, y + T - 11, 3, 3);
+        Color slit = ph == 1 ? (tick / 3 % 2 == 0 ? th.accent : new Color(255, 80, 60)) : new Color(8, 6, 10);
+        if (dx != 0) g.fillRect(dx < 0 ? x + 3 : x + T - 13, y + 30, 10, 8);
+        else g.fillRect(x + 18, dy > 0 ? y + T - 12 : y + 4, 12, 8);
+        g.setColor(slit);
+        if (dx != 0) g.fillRect(dx < 0 ? x + 4 : x + T - 12, y + 31, 8, 6);
+        else g.fillRect(x + 19, dy > 0 ? y + T - 11 : y + 5, 10, 6);
+        if (ph == 2) {
+            Point a = arrowPos(tick);
+            g.setColor(new Color(120, 84, 48));                        // древко
+            if (dx != 0) g.fillRect(a.x - 16, a.y - 1, 28, 3); else g.fillRect(a.x - 1, a.y - 16, 3, 28);
+            g.setColor(new Color(220, 226, 238));                      // наконечник
+            if (dx != 0) {
+                int hx = a.x + dx * 16;
+                g.fillPolygon(new int[]{hx, hx - dx * 8, hx - dx * 8}, new int[]{a.y, a.y - 5, a.y + 5}, 3);
+            } else {
+                int hy = a.y + dy * 16;
+                g.fillPolygon(new int[]{a.x, a.x - 5, a.x + 5}, new int[]{hy, hy - dy * 8, hy - dy * 8}, 3);
+            }
+            g.setColor(new Color(200, 70, 60));                        // оперение
+            if (dx != 0) g.fillRect(a.x - dx * 16 - (dx > 0 ? 0 : 6), a.y - 4, 6, 8);
+            else g.fillRect(a.x - 4, a.y - dy * 16 - (dy > 0 ? 0 : 6), 8, 6);
         }
     }
 

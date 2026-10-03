@@ -5,7 +5,7 @@ import java.awt.*;
 // Выбор в комнате греха. У каждого выбора два варианта: E и L.
 // Один вариант «добрый» (идёт в копилку Рая), другой «плохой» (идёт в копилку Ада).
 public class Decision {
-    public enum Kind { TOTEM, CHEST, GIRL, SHADOW, CAKE, BED, ALTAR }
+    public enum Kind { TOTEM, CHEST, MONEY, GIRL, SHADOW, FISH, BED, ALTAR, RAG, GENIE }
 
     // label — подпись у кнопки, good — добрый ли поступок, result — что написать после выбора
     public record Option(String label, boolean good, String result) {}
@@ -18,6 +18,7 @@ public class Decision {
     public final Option optE, optL;      // E — первый вариант, L — второй (удар мечом)
     public boolean decided;
     public Option picked;
+    public boolean showCat = true;       // для рыбы: рисовать ли кошку рядом (false, если кошка уже сидит у Эльзы на плечах)
 
     private final Totem totem;           // для тотема используем готовый класс
     private final Cat cat;               // для кровати — кот, который лежит на ней
@@ -30,7 +31,8 @@ public class Decision {
         this.optE = optE;
         this.optL = optL;
         totem = kind == Kind.TOTEM ? new Totem(col, row) : null;
-        cat = kind == Kind.BED ? new Cat(col, row) : null;
+        cat = kind == Kind.BED ? new Cat(col, row)
+                : kind == Kind.FISH ? new Cat(col + 1, row) : null;
     }
 
     public int centerX() { return col * T + T / 2; }
@@ -69,6 +71,7 @@ public class Decision {
                 }
             }
             case CHEST -> drawChest(g, x, y, tick, good, bad);
+            case MONEY -> drawMoney(g, x, y, tick, good, bad);
             case GIRL -> {
                 float a = bad ? Math.max(0f, 1f - age / 90f) : 1f;      // плохой выбор: силуэт исчезает
                 withAlpha(g, a, () -> drawGirl(g, x, y));
@@ -79,7 +82,18 @@ public class Decision {
                 int shift = decided ? Math.min(age, 80) / 2 : 0;
                 withAlpha(g, a, () -> drawShadow(g, x + shift, y, tick));
             }
-            case CAKE -> drawCake(g, x, y, good, bad);
+            case FISH -> {
+                drawFish(g, x, y, tick);
+                if (good) drawHeart(g, x + 30, y - 8 - (int) (Math.sin(tick * 0.1) * 3));
+            }
+            case RAG -> {
+                drawRagToy(g, x, y, tick, good, bad);
+                if (good) drawHeart(g, x + 18, y - 6 - (int) (Math.sin(tick * 0.1) * 3));
+            }
+            case GENIE -> {
+                float a = decided ? Math.max(0f, 1f - age / 80f) : 1f;  // мираж рассеивается
+                withAlpha(g, a, () -> drawGenie(g, x, y, tick));
+            }
             case BED -> drawBed(g, x, y, tick, good, bad);
             case ALTAR -> drawAltar(g, x, y, tick, good, bad);
         }
@@ -128,6 +142,37 @@ public class Decision {
         }
     }
 
+    // деньги на столе в кабинете (сам стол рисует Prop.DESK): «не брать» — купюры остаются и светятся, «взять» — стол пуст
+    private void drawMoney(Graphics2D g, int x, int y, int tick, boolean good, boolean bad) {
+        if (bad) return;
+        g.setColor(new Color(60, 130, 70));                        // пачка купюр
+        g.fillRect(x + 2, y + 16, 18, 10);
+        g.setColor(new Color(110, 190, 120));
+        g.fillRect(x + 2, y + 16, 18, 3);
+        g.setColor(new Color(236, 228, 190));
+        g.fillRect(x + 9, y + 16, 4, 10);
+        g.setColor(new Color(70, 150, 80));                        // вторая пачка сверху
+        g.fillRect(x + 6, y + 9, 18, 8);
+        g.setColor(new Color(120, 200, 130));
+        g.fillRect(x + 6, y + 9, 18, 3);
+        g.setColor(new Color(236, 228, 190));
+        g.fillRect(x + 13, y + 9, 4, 8);
+        g.setColor(new Color(250, 215, 80));                       // монеты
+        g.fillOval(x + 26, y + 20, 10, 6);
+        g.fillOval(x + 30, y + 17, 10, 6);
+        g.setColor(new Color(150, 110, 60));                       // кошелёк
+        g.fillOval(x + 36, y + 14, 12, 12);
+        g.setColor(new Color(110, 78, 40));
+        g.fillRect(x + 39, y + 12, 6, 3);
+        if (good) {
+            g.setColor(new Color(255, 235, 140, 70));
+            g.fillOval(x - 4, y - 6, T + 8, 36);
+        } else if ((tick / 14) % 2 == 0) {
+            g.setColor(Color.WHITE);
+            g.fillRect(x + 31, y + 14, 2, 2);
+        }
+    }
+
     private void drawGirl(Graphics2D g, int x, int y) {
         drawShadowOval(g, x, y);
         g.setColor(new Color(240, 130, 180));                      // платье
@@ -162,36 +207,91 @@ public class Decision {
         g.fillRect(x + 27, y + 11 + glint, 3, 3);
     }
 
-    // стол с тортом: «съесть» оставляет пустую тарелку, «разбить» — крошки по полу
-    private void drawCake(Graphics2D g, int x, int y, boolean good, boolean bad) {
+    // рыба на тарелке посреди мусора: после выбора остаются кости; кошка рядом, пока она не сидит у Эльзы на плечах
+    private void drawFish(Graphics2D g, int x, int y, int tick) {
         drawShadowOval(g, x, y);
-        if (good) {                                                // разбито: осколки и крошки
-            g.setColor(new Color(150, 100, 60));
-            g.fillPolygon(new int[]{x + 6, x + 24, x + 14}, new int[]{y + 46, y + 46, y + 38}, 3);
-            g.fillPolygon(new int[]{x + 26, x + 42, x + 36}, new int[]{y + 46, y + 46, y + 40}, 3);
-            g.setColor(new Color(250, 200, 220));
-            g.fillRect(x + 12, y + 42, 6, 4);
-            g.fillRect(x + 30, y + 43, 5, 3);
-            return;
+        g.setColor(new Color(74, 52, 34));                         // ящик-стол
+        g.fillRect(x + 4, y + 34, 40, 12);
+        g.setColor(new Color(104, 74, 46));
+        g.fillRect(x + 2, y + 32, 44, 4);
+        g.setColor(new Color(220, 222, 226));                      // тарелка
+        g.fillOval(x + 6, y + 28, 36, 8);
+        if (!decided) {                                            // целая рыба
+            g.setColor(new Color(110, 170, 210));
+            g.fillOval(x + 11, y + 18, 26, 12);
+            g.fillPolygon(new int[]{x + 36, x + 45, x + 45}, new int[]{y + 24, y + 17, y + 31}, 3);
+            g.setColor(new Color(190, 225, 245));
+            g.fillRect(x + 18, y + 21, 12, 2);
+            g.setColor(Color.BLACK);
+            g.fillRect(x + 15, y + 22, 2, 2);
+            if ((tick / 12) % 2 == 0) {
+                g.setColor(Color.WHITE);
+                g.fillRect(x + 28, y + 16, 2, 2);
+            }
+        } else {                                                   // остались кости
+            g.setColor(new Color(236, 232, 214));
+            g.fillRect(x + 12, y + 27, 26, 2);
+            for (int i = 0; i < 4; i++) g.fillRect(x + 16 + i * 5, y + 23, 1, 9);
+            g.fillRect(x + 9, y + 25, 4, 5);
+            g.fillPolygon(new int[]{x + 38, x + 44, x + 44}, new int[]{y + 28, y + 24, y + 32}, 3);
         }
-        g.setColor(new Color(120, 80, 44));                        // стол
-        g.fillRect(x + 2, y + 32, 44, 5);
-        g.fillRect(x + 6, y + 37, 5, 10);
-        g.fillRect(x + 37, y + 37, 5, 10);
-        g.setColor(new Color(236, 232, 224));                      // тарелка
-        g.fillRect(x + 8, y + 29, 32, 4);
-        if (bad) {                                                 // съедено: крошки на тарелке
-            g.setColor(new Color(250, 200, 220));
-            g.fillRect(x + 14, y + 28, 4, 2);
-            g.fillRect(x + 26, y + 28, 3, 2);
-            return;
+        if (showCat && cat != null) cat.draw(g, tick);             // голодная кошка рядом
+    }
+
+    // комната Эльзы в том доме: тряпка и одна игрушка. «Взять игрушку» — игрушки нет, «лечь» — Эльза уснула на тряпке
+    private void drawRagToy(Graphics2D g, int x, int y, int tick, boolean good, boolean bad) {
+        drawShadowOval(g, x, y);
+        g.setColor(new Color(50, 60, 70, 140));                    // сырость на полу
+        g.fillOval(x - 2, y + 41, 52, 7);
+        g.setColor(new Color(100, 92, 84));                        // тряпка
+        g.fillPolygon(new int[]{x + 2, x + 8, x + 20, x + 32, x + 38, x + 24, x + 10},
+                new int[]{y + 45, y + 38, y + 36, y + 39, y + 45, y + 47, y + 47}, 7);
+        g.setColor(new Color(72, 66, 60));
+        g.fillRect(x + 10, y + 40, 12, 2);
+        if (!decided) {                                            // мягкое свечение у игрушки
+            g.setColor(new Color(255, 235, 140, 50));
+            g.fillOval(x + 22, y + 16, 28, 34);
         }
-        g.setColor(new Color(214, 160, 90));                       // торт
-        g.fillRect(x + 12, y + 20, 24, 10);
-        g.setColor(new Color(252, 214, 228));
-        g.fillRect(x + 12, y + 16, 24, 6);
-        g.setColor(new Color(220, 50, 60));
-        g.fillOval(x + 21, y + 10, 7, 7);
+        if (!good) {                                               // игрушка: потрёпанный зайчик
+            g.setColor(bad ? new Color(150, 130, 120) : new Color(214, 190, 170));
+            g.fillOval(x + 28, y + 34, 14, 12);
+            g.fillOval(x + 30, y + 24, 12, 12);
+            g.fillOval(x + 29, y + 17, 5, 9);
+            g.fillOval(x + 38, y + 17, 5, 9);
+            g.setColor(Color.BLACK);
+            g.fillRect(x + 33, y + 29, 2, 2);
+            g.fillRect(x + 37, y + 29, 2, 2);
+        }
+        if (bad) {                                                 // уснула: плывут «z»
+            g.setFont(new Font("Monospaced", Font.BOLD, 16));
+            g.setColor(new Color(200, 220, 255, 200));
+            for (int i = 0; i < 3; i++) g.drawString("z", x + 8 + i * 6, y - 4 - ((tick / 3 + i * 14) % 40));
+        }
+    }
+
+    // псевдо-джинн: синий дымчатый призрак с лампой; глаза иногда вспыхивают красным (он лжёт)
+    private void drawGenie(Graphics2D g, int x, int y, int tick) {
+        int sway = (int) (Math.sin(tick * 0.1) * 3);
+        g.setColor(new Color(0, 0, 0, 50));
+        g.fillOval(x + 6, y + 42, 36, 6);
+        g.setColor(new Color(240, 190, 40));                       // лампа у ног
+        g.fillOval(x + 30, y + 41, 14, 6);
+        g.fillRect(x + 42, y + 40, 4, 3);
+        g.setColor(new Color(70, 140, 230, 200));                  // хвост-дым
+        g.fillPolygon(new int[]{x + 14, x + 34, x + 28 + sway, x + 20 + sway}, new int[]{y + 34, y + 34, y + 48, y + 48}, 4);
+        g.setColor(new Color(90, 160, 240, 215));                  // торс
+        g.fillOval(x + 11, y + 14, 26, 26);
+        g.setColor(new Color(60, 110, 200, 230));                  // скрещённые руки
+        g.fillRect(x + 8, y + 24, 32, 5);
+        g.setColor(new Color(130, 190, 250, 230));                 // голова
+        g.fillOval(x + 16, y + 2, 16, 16);
+        g.setColor(new Color(150, 60, 170));                       // тюрбан
+        g.fillRect(x + 14, y, 20, 7);
+        g.setColor(new Color(250, 215, 80));
+        g.fillRect(x + 22, y + 1, 4, 4);
+        g.setColor((tick / 25) % 7 == 0 ? new Color(235, 40, 50) : new Color(255, 240, 120));
+        g.fillRect(x + 19, y + 10, 3, 3);
+        g.fillRect(x + 27, y + 10, 3, 3);
     }
 
     // кровать с котом: «лечь спать» — над ней плывут «z», «растрепать» — подушка и одеяло на полу

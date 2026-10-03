@@ -22,7 +22,8 @@ public class Room {
     //  COLLECT — собрать все предметы (корона, розы, угощение, сферы)
     //  TOTEMS  — разбить все тотемы мечом
     //  CHOICE  — сделать выбор (E / L): добрый или плохой поступок
-    public enum Goal { NONE, CANDLE, CAT, COLLECT, TOTEMS, CHOICE }
+    //  ESCAPE  — поговорить с персонажем и вырваться из его рук (жать E / ПРОБЕЛ)
+    public enum Goal { NONE, CANDLE, CAT, COLLECT, TOTEMS, CHOICE, ESCAPE }
 
     // табличка с подсказкой (для обучения)
     public record Sign(int col, int row, String text) {}
@@ -40,6 +41,7 @@ public class Room {
     public final List<Pickup> pickups = new ArrayList<>();
     public final List<Trap> traps = new ArrayList<>();
     public final List<Sign> signs = new ArrayList<>();
+    public final List<Prop> props = new ArrayList<>();   // декорации и сценки с репликами Эльзы
     public final Set<Character> doneDoors = new HashSet<>();   // двери, за которыми испытание пройдено
     public Cat cat;                                  // кот этой комнаты (если он тут есть)
     public boolean sideView;                         // true = вид сбоку (платформер)
@@ -119,7 +121,7 @@ public class Room {
     public boolean trapNear(int col, int dist) {
         for (Trap t : traps) {
             if (t.type == Trap.Type.CRUMBLE) continue;
-            if (col >= t.col - dist && col <= t.col2 + dist) return true;
+            if (col >= t.minCol() - dist && col <= t.maxCol() + dist) return true;
         }
         return false;
     }
@@ -201,6 +203,7 @@ public class Room {
 
         for (Trap t : traps) t.draw(g, tick, theme);
         for (Sign s : signs) drawSign(g, s);
+        for (Prop p : props) p.draw(g, tick);
         for (Totem t : totems) t.draw(g, tick);
         for (Vase v : vases) v.draw(g, tick);
         if (choice != null) choice.draw(g, tick);
