@@ -22,8 +22,9 @@ public class Room {
     //  COLLECT — собрать все предметы (корона, розы, угощение, сферы)
     //  TOTEMS  — разбить все тотемы мечом
     //  CHOICE  — сделать выбор (E / L): добрый или плохой поступок
+    //  PUZZLE  — решить загадку комнаты (игрушки детям, поддельная печать): цель закрывает сама загадка
     //  ESCAPE  — поговорить с персонажем и вырваться из его рук (жать E / ПРОБЕЛ)
-    public enum Goal { NONE, CANDLE, CAT, COLLECT, TOTEMS, CHOICE, ESCAPE }
+    public enum Goal { NONE, CANDLE, CAT, COLLECT, TOTEMS, CHOICE, ESCAPE, PUZZLE }
 
     // табличка с подсказкой (для обучения)
     public record Sign(int col, int row, String text) {}
@@ -53,6 +54,9 @@ public class Room {
     // оформление: GALLERY — кирпичная галерея с лампами (комнаты), VOID — почти чёрное (спуски и коридоры), CLASSIC — старый вид
     public enum Look { CLASSIC, GALLERY, VOID }
     public Look look = Look.GALLERY;
+    // пиксельный фон «сырой подвал» (PixelBackground): какой грех и какая комната; null = старый фон
+    public PixelBackground.Sin pxSin;
+    public int pxRoom;                               // номер комнаты греха (1..N); 0 или больше N = общий фон греха
     public String title, subtitle;                   // заставка при входе
     public int checkTime = 45;                       // сколько кадров длится безопасная проверка вазы (в каждой комнате своё)
     public int wind;                                 // >0 — течение тянет игрока влево (Лень)
@@ -166,7 +170,7 @@ public class Room {
 
         if (sideView) {
             drawSideBackground(g, camX, camY, c0, c1, tick);
-            if (look != Look.VOID) drawParticles(g, camX, camY, tick);
+            if (look != Look.VOID && !usesPixelBg()) drawParticles(g, camX, camY, tick);
         } else {
             g.setColor(new Color(20, 28, 44));
             g.fillRect(camX, camY, VIEW_W, VIEW_H);
@@ -215,8 +219,56 @@ public class Room {
         for (Pickup p : pickups) p.draw(g, tick);
     }
 
+
+    // ---------- пиксельный фон (PixelBackground) ----------
+    private static final double PX_FLOOR = 0.8334;               // пол — верх ряда 10 (из 12): 480 / 576
+    private static final Map<PixelBackground.Sin, java.awt.image.BufferedImage> PX_TILES = new HashMap<>();
+    private static Room pxOwner;                                 // картинка комнаты хранится только для текущей комнаты
+    private static java.awt.image.BufferedImage pxImage;
+
+    private boolean usesPixelBg() {
+        return pxSin != null && look == Look.GALLERY && sideView;
+    }
+
+    private boolean pxSpecific() {
+        return pxRoom >= 1 && pxRoom <= PixelBackground.roomCount(pxSin);
+    }
+
+    private void drawPixelBackground(Graphics2D g, int camX, int camY) {
+        Object oldInterp = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        if (pxSpecific()) {
+            // фон конкретной комнаты (ванная, спальня, фуршет...) растянут на всю длину комнаты
+            if (pxOwner != this || pxImage == null) {
+                pxImage = PixelBackground.renderRoom(pxSin, pxRoom, widthPx(), heightPx(), PX_FLOOR);
+                pxOwner = this;
+            }
+            g.drawImage(pxImage, 0, 0, null);
+        } else {
+            // общий фон греха: один экран, который повторяется по длине комнаты (каждый второй — зеркально, без шва)
+            java.awt.image.BufferedImage tile = PX_TILES.get(pxSin);
+            if (tile == null) {
+                tile = PixelBackground.render(pxSin, VIEW_W, VIEW_H, PX_FLOOR, true);
+                PX_TILES.put(pxSin, tile);
+            }
+            int k0 = Math.floorDiv(camX, VIEW_W), k1 = Math.floorDiv(camX + VIEW_W - 1, VIEW_W);
+            for (int k = k0; k <= k1; k++) {
+                int x = k * VIEW_W;
+                if (k % 2 == 0) g.drawImage(tile, x, camY, null);
+                else g.drawImage(tile, x + VIEW_W, camY, -VIEW_W, VIEW_H, null);
+            }
+        }
+        if (oldInterp != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldInterp);
+
+        // лёгкая пыль / искры поверх фона
+        g.translate(camX, camY);
+        PixelBackground.drawDust(g, pxSin, System.currentTimeMillis(), VIEW_W, VIEW_H, pxSpecific());
+        g.translate(-camX, -camY);
+    }
+
     // ---------- атмосфера комнат сбоку ----------
     private void drawSideBackground(Graphics2D g, int camX, int camY, int c0, int c1, int tick) {
+        if (usesPixelBg()) { drawPixelBackground(g, camX, camY); return; }
         if (look == Look.GALLERY) { drawGalleryBackground(g, camX, camY, tick); return; }
         if (look == Look.VOID) { drawVoidBackground(g, camX, camY); return; }
         g.setPaint(new GradientPaint(0, camY, theme.skyTop, 0, camY + VIEW_H, theme.skyBottom));
@@ -317,6 +369,8 @@ public class Room {
     }
 
     private void drawSideWall(Graphics2D g, int x, int y, int col, int row) {
+        // потолок и пол рисует сам пиксельный фон; блоки и платформы внутри комнаты остаются
+        if (usesPixelBg() && (row == 0 || row >= rows() - 2)) return;
         if (look == Look.GALLERY) { drawGalleryWall(g, x, y, col, row); return; }
         if (look == Look.VOID) { drawVoidWall(g, x, y, col, row); return; }
         boolean surface = tileAt(col, row - 1) != '#';
