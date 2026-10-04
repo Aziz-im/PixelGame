@@ -462,3 +462,217 @@ public class Prop {
         g.setComposite(old);
     }
 }
+
+
+// ==================== ВАЗА (испытание «найди свечу») ====================
+class Vase {
+    public enum State { INTACT, CHECKED, BROKEN }
+
+    private static final Color[] COLORS = {
+            new Color(176, 98, 62), new Color(72, 132, 142), new Color(120, 86, 160)
+    };
+
+    public final int col, row;
+    public State state = State.INTACT;
+    public boolean hasCandle;
+    private final int style;
+
+    public Vase(int col, int row) {
+        this.col = col;
+        this.row = row;
+        this.style = (col * 7 + row * 3) % COLORS.length;
+    }
+
+    public Rectangle box()  { return new Rectangle(col * Room.TILE + 8, row * Room.TILE + 6, 32, 40); }
+    public int centerX()    { return col * Room.TILE + Room.TILE / 2; }
+    public int centerY()    { return row * Room.TILE + Room.TILE / 2; }
+
+    private static Color darker(Color c) {
+        return new Color((int) (c.getRed() * 0.7), (int) (c.getGreen() * 0.7), (int) (c.getBlue() * 0.7));
+    }
+
+    public void draw(Graphics2D g, int tick) {
+        int x = col * Room.TILE, y = row * Room.TILE;
+        Color body = COLORS[style];
+
+        if (state == State.BROKEN) {                              // осколки
+            g.setColor(body);
+            g.fillPolygon(new int[]{x + 8, x + 18, x + 14}, new int[]{y + 46, y + 46, y + 40}, 3);
+            g.fillPolygon(new int[]{x + 22, x + 34, x + 28}, new int[]{y + 46, y + 46, y + 38}, 3);
+            g.setColor(darker(body));
+            g.fillPolygon(new int[]{x + 34, x + 42, x + 40}, new int[]{y + 46, y + 46, y + 42}, 3);
+            return;
+        }
+
+        g.setColor(new Color(0, 0, 0, 60));
+        g.fillOval(x + 8, y + 42, 32, 6);
+        g.setColor(darker(body));                                 // горлышко и ободок
+        g.fillRect(x + 18, y + 8, 12, 10);
+        g.fillRect(x + 15, y + 6, 18, 5);
+        g.setColor(body);                                         // тело
+        g.fillOval(x + 9, y + 16, 30, 30);
+        g.setColor(new Color(255, 255, 255, 60));
+        g.fillRect(x + 14, y + 22, 4, 10);
+
+        if (state == State.CHECKED) {                             // проверена: тёмное горлышко и галочка
+            g.setColor(new Color(20, 14, 26));
+            g.fillOval(x + 17, y + 6, 14, 4);
+            g.setColor(new Color(120, 230, 140));
+            Stroke old = g.getStroke();
+            g.setStroke(new BasicStroke(3));
+            g.drawLine(x + 17, y + 30, x + 22, y + 36);
+            g.drawLine(x + 22, y + 36, x + 32, y + 24);
+            g.setStroke(old);
+        }
+    }
+}
+
+
+// ==================== ТОТЕМ ЯРОСТИ ====================
+// Тотем ярости: его нужно разбить мечом (L). Три удара.
+class Totem {
+    private static final int T = Room.TILE;
+
+    public final int col, row;
+    public int hp = 3;
+    public int flash;                 // вспышка после удара
+    public boolean broken;
+
+    public Totem(int col, int row) {
+        this.col = col;
+        this.row = row;
+    }
+
+    public Rectangle box() { return new Rectangle(col * T + 6, row * T + 2, 36, 44); }
+
+    public void hit() {
+        if (broken) return;
+        hp--;
+        flash = 10;
+        if (hp <= 0) broken = true;
+    }
+
+    public void draw(Graphics2D g, int tick) {
+        int x = col * T, y = row * T;
+        if (broken) {                                                  // обломки
+            g.setColor(new Color(70, 30, 34));
+            g.fillPolygon(new int[]{x + 8, x + 22, x + 16}, new int[]{y + 46, y + 46, y + 36}, 3);
+            g.fillPolygon(new int[]{x + 24, x + 40, x + 32}, new int[]{y + 46, y + 46, y + 32}, 3);
+            g.setColor(new Color(110, 48, 50));
+            g.fillRect(x + 16, y + 42, 10, 4);
+            return;
+        }
+        g.setColor(new Color(0, 0, 0, 70));
+        g.fillOval(x + 6, y + 40, 36, 8);
+        Color stone = flash > 0 ? new Color(255, 190, 170) : new Color(104, 46, 50);
+        Color dark = flash > 0 ? new Color(230, 140, 120) : new Color(62, 26, 32);
+        g.setColor(dark);
+        g.fillRect(x + 8, y + 8, 32, 38);
+        g.setColor(stone);
+        g.fillRect(x + 10, y + 6, 28, 36);
+        g.fillPolygon(new int[]{x + 10, x + 5, x + 17}, new int[]{y + 10, y - 3, y + 6}, 3);      // рога
+        g.fillPolygon(new int[]{x + 38, x + 43, x + 31}, new int[]{y + 10, y - 3, y + 6}, 3);
+        g.setColor((tick / 10) % 2 == 0 ? new Color(255, 170, 40) : new Color(230, 90, 30));      // глаза
+        g.fillRect(x + 15, y + 16, 6, 5);
+        g.fillRect(x + 27, y + 16, 6, 5);
+        g.setColor(new Color(20, 8, 10));                                                          // пасть
+        g.fillRect(x + 16, y + 30, 16, 4);
+        g.setColor(new Color(30, 12, 16));                                                         // трещины
+        if (hp <= 2) g.fillRect(x + 22, y + 8, 2, 10);
+        if (hp <= 1) {
+            g.fillRect(x + 14, y + 22, 10, 2);
+            g.fillRect(x + 30, y + 24, 2, 12);
+        }
+    }
+}
+
+
+// ==================== ПРЕДМЕТЫ ДЛЯ СБОРА ====================
+// Предметы, которые нужно собрать в испытании: корона, розы, угощение, сферы снов.
+class Pickup {
+    public enum Kind { CROWN, ROSE, FOOD, ORB }
+
+    private static final int T = Room.TILE;
+
+    public final Kind kind;
+    public final int col, row;
+    public boolean taken;
+
+    public Pickup(Kind kind, int col, int row) {
+        this.kind = kind;
+        this.col = col;
+        this.row = row;
+    }
+
+    public Rectangle box() { return new Rectangle(col * T + 8, row * T + 8, 32, 36); }
+
+    public void draw(Graphics2D g, int tick) {
+        if (taken) return;
+        int x = col * T, y = row * T + (int) (Math.sin(tick * 0.08 + col) * 4);   // парит вверх-вниз
+
+        Color glow = switch (kind) {
+            case CROWN -> new Color(255, 215, 90);
+            case ROSE  -> new Color(255, 100, 160);
+            case FOOD  -> new Color(255, 180, 90);
+            case ORB   -> new Color(120, 180, 255);
+        };
+        g.setColor(Theme.alpha(glow, 46));
+        g.fillOval(x + 2, y + 4, 44, 44);
+
+        switch (kind) {
+            case CROWN -> {
+                g.setColor(new Color(240, 190, 40));
+                g.fillPolygon(new int[]{x + 8, x + 8, x + 16, x + 24, x + 32, x + 40, x + 40},
+                        new int[]{y + 34, y + 14, y + 23, y + 10, y + 23, y + 14, y + 34}, 7);
+                g.setColor(new Color(190, 140, 20));
+                g.fillRect(x + 8, y + 30, 32, 6);
+                g.setColor(new Color(220, 50, 70));
+                g.fillRect(x + 22, y + 24, 5, 5);
+                g.setColor(new Color(80, 160, 255));
+                g.fillRect(x + 12, y + 26, 4, 4);
+                g.fillRect(x + 32, y + 26, 4, 4);
+            }
+            case ROSE -> {
+                g.setColor(new Color(40, 140, 60));
+                g.fillRect(x + 23, y + 26, 3, 18);
+                g.fillOval(x + 26, y + 32, 10, 5);
+                g.setColor(new Color(200, 30, 90));
+                g.fillOval(x + 14, y + 8, 20, 20);
+                g.setColor(new Color(240, 80, 140));
+                g.fillOval(x + 18, y + 12, 12, 12);
+                g.setColor(new Color(150, 20, 70));
+                g.fillOval(x + 21, y + 15, 6, 6);
+            }
+            case FOOD -> {
+                if (col % 2 == 0) {                                    // яблоко
+                    g.setColor(new Color(200, 40, 40));
+                    g.fillOval(x + 10, y + 14, 28, 28);
+                    g.setColor(new Color(240, 100, 90));
+                    g.fillRect(x + 16, y + 20, 4, 8);
+                    g.setColor(new Color(90, 60, 30));
+                    g.fillRect(x + 23, y + 8, 3, 8);
+                    g.setColor(new Color(60, 170, 70));
+                    g.fillOval(x + 26, y + 8, 10, 6);
+                } else {                                               // пирог
+                    g.setColor(new Color(170, 110, 50));
+                    g.fillOval(x + 6, y + 20, 36, 22);
+                    g.setColor(new Color(220, 160, 80));
+                    g.fillOval(x + 8, y + 16, 32, 20);
+                    g.setColor(new Color(250, 240, 220));
+                    g.fillOval(x + 16, y + 18, 16, 8);
+                    g.setColor(new Color(220, 50, 60));
+                    g.fillOval(x + 21, y + 14, 6, 6);
+                }
+            }
+            case ORB -> {
+                int r = 14 + (int) (Math.sin(tick * 0.1 + col) * 2);
+                g.setColor(new Color(90, 140, 230));
+                g.fillOval(x + 24 - r, y + 26 - r, r * 2, r * 2);
+                g.setColor(new Color(160, 210, 255));
+                g.fillOval(x + 24 - r + 4, y + 26 - r + 4, r * 2 - 10, r * 2 - 10);
+                g.setColor(Color.WHITE);
+                g.fillOval(x + 24 - r + 7, y + 26 - r + 6, 7, 5);
+            }
+        }
+    }
+}

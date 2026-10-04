@@ -7,9 +7,10 @@ import java.awt.*;
 //  CRUMBLE       — хрупкая плита: рушится, если на ней постоять, потом возвращается
 //  SAW           — пила ездит туда-сюда по полу
 //  FLAME         — струя огня из пола по таймеру (сначала искры — предупреждение)
+//  ROCK          — камень в потолке: когда подходишь, дрожит, потом падает (успей отойти)
 //  ARROW         — стрелострел: торчит из стены/блока, мигает (предупреждение) и пускает стрелу по прямой
 public class Trap {
-    public enum Type { HIDDEN_SPIKES, CRUMBLE, SAW, FLAME, ARROW }
+    public enum Type { HIDDEN_SPIKES, CRUMBLE, SAW, FLAME, ARROW, ROCK }
 
     private static final int T = Room.TILE;
 
@@ -39,6 +40,7 @@ public class Trap {
     public static Trap crumble(int col, int row)              { return new Trap(Type.CRUMBLE, col, row, col, 0); }
     public static Trap saw(int colA, int colB, int row)       { return new Trap(Type.SAW, colA, row, colB, 0); }
     public static Trap flame(int col, int row, int offset)    { return new Trap(Type.FLAME, col, row, col, offset); }
+    public static Trap rock(int col, int row)                 { return new Trap(Type.ROCK, col, row, col, 0); }   // row — ряд, где камень висит под потолком
 
     // стрелострел в клетке (col,row); (dx,dy) — куда летит стрела: (0,1) вниз, (0,-1) вверх, (-1,0) влево, (1,0) вправо
     public static Trap arrow(int col, int row, int dx, int dy, int range, int offset) {
@@ -78,8 +80,26 @@ public class Trap {
                     state = 0;                                         // вернулась (если игрок не внутри неё)
                 }
             }
+            case ROCK -> {
+                switch (state) {
+                    case 0 -> { if (Math.abs(p.centerX() - (col * T + T / 2)) < ROCK_RADIUS) { state = 1; timer = ROCK_WARN; } }   // дрожит
+                    case 1 -> { if (--timer <= 0) { state = 2; timer = ROCK_FALL; } }                                             // падает
+                    case 2 -> { if (--timer <= 0) { state = 3; timer = 110; } }                                                   // обломки лежат
+                    default -> { if (--timer <= 0) state = 0; }                                                                   // новый камень
+                }
+            }
             default -> { }
         }
+    }
+
+    // ----- камень -----
+    private static final int ROCK_RADIUS = 76, ROCK_WARN = 44, ROCK_FALL = 18, ROCK_LAND_Y = 10 * T;   // 10 ряд — пол в комнатах сбоку
+
+    private int rockBottom() {                      // нижний край камня в этот кадр
+        int start = (row + 1) * T;
+        if (state != 2) return start;
+        double prog = (ROCK_FALL - timer + 1) / (double) ROCK_FALL;
+        return start + (int) ((ROCK_LAND_Y - start) * Math.min(1.0, prog));
     }
 
     private int sawX(int tick) {
@@ -117,6 +137,7 @@ public class Trap {
                 Point a = arrowPos(tick);
                 yield dx != 0 ? new Rectangle(a.x - 16, a.y - 6, 32, 12) : new Rectangle(a.x - 10, a.y - 16, 20, 32);
             }
+            case ROCK -> state == 2 ? new Rectangle(col * T + 8, rockBottom() - 44, 32, 44) : null;
             case HIDDEN_SPIKES -> state == 2 ? new Rectangle(col * T + 6, row * T + 12, 36, 36) : null;
             case SAW -> { int cx = sawX(tick), cy = row * T + 32; yield new Rectangle(cx - 15, cy - 15, 30, 30); }
             case FLAME -> flamePhase(tick) == 2 ? new Rectangle(col * T + 10, (row - 2) * T, 28, 3 * T) : null;
@@ -132,6 +153,7 @@ public class Trap {
             case SAW -> drawSaw(g, tick, th);
             case FLAME -> drawFlame(g, tick);
             case ARROW -> drawArrow(g, tick, th);
+            case ROCK -> drawRock(g, tick, th);
         }
     }
 
@@ -168,6 +190,48 @@ public class Trap {
             if (dx != 0) g.fillRect(a.x - dx * 16 - (dx > 0 ? 0 : 6), a.y - 4, 6, 8);
             else g.fillRect(a.x - 4, a.y - dy * 16 - (dy > 0 ? 0 : 6), 8, 6);
         }
+    }
+
+    // камень: висит под потолком, перед падением трясётся, сыплется пыль, а на полу мигает метка, куда он упадёт
+    private void drawRock(Graphics2D g, int tick, Theme th) {
+        int x = col * T;
+        if (state == 3) {                                              // обломки на полу
+            g.setColor(new Color(30, 28, 36));
+            g.fillRect(x + 6, ROCK_LAND_Y - 8, 14, 8);
+            g.fillRect(x + 24, ROCK_LAND_Y - 12, 16, 12);
+            g.fillRect(x + 14, ROCK_LAND_Y - 16, 12, 8);
+            g.setColor(new Color(70, 66, 80));
+            g.fillRect(x + 6, ROCK_LAND_Y - 8, 14, 2);
+            g.fillRect(x + 24, ROCK_LAND_Y - 12, 16, 2);
+            return;
+        }
+        int shake = state == 1 ? (tick % 2 == 0 ? -2 : 2) : 0;
+        int bottom = rockBottom();
+        int top = bottom - 44;
+        if (state == 1) {
+            if ((tick / 4) % 2 == 0) {                                 // метка падения на полу
+                g.setColor(th.accent);
+                g.fillRect(x + 6, ROCK_LAND_Y - 4, T - 12, 4);
+            }
+            g.setColor(new Color(150, 146, 160));                      // пыль из потолка
+            for (int i = 0; i < 3; i++) g.fillRect(x + 12 + i * 11 + shake, top + 44 + (tick * 3 + i * 17) % 40, 2, 3);
+        } else if (state == 2) {
+            g.setColor(new Color(0, 0, 0, 60));                        // тень на полу
+            g.fillRect(x + 8, ROCK_LAND_Y - 3, 32, 3);
+        }
+        if (state == 0 || state == 1) {                                // крепление к потолку
+            g.setColor(new Color(24, 22, 30));
+            g.fillRect(x + 18 + shake, top - 6, 12, 8);
+        }
+        g.setColor(new Color(34, 32, 42));                             // глыба
+        g.fillPolygon(new int[]{x + 8 + shake, x + 40 + shake, x + 36 + shake, x + 24 + shake, x + 12 + shake},
+                new int[]{top, top, bottom - 8, bottom, bottom - 6}, 5);
+        g.setColor(new Color(76, 72, 88));                             // светлая грань
+        g.fillRect(x + 8 + shake, top, 32, 3);
+        g.fillRect(x + 8 + shake, top, 3, 22);
+        g.setColor(new Color(12, 10, 16));                             // трещина
+        g.fillRect(x + 22 + shake, top + 6, 2, 16);
+        g.fillRect(x + 22 + shake, top + 20, 10, 2);
     }
 
     private void drawHidden(Graphics2D g, int tick, Theme th) {

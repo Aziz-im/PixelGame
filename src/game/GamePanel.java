@@ -381,6 +381,7 @@ public class GamePanel extends JPanel implements KeyListener {
         Room hall = new Room("Коридор · " + SIN_NAMES[loc - 1], hb.build());
         hall.theme = Theme.HALL;
         hall.basement = true;                                  // кирпичные стены и железные двери (общее для всех локаций)
+        hall.look = Room.Look.VOID;                            // почти чёрное оформление
         hall.title = "ЛОКАЦИЯ " + loc;
         hall.subtitle = loc == LOCS ? SIN_NAMES[loc - 1] + ": одна большая комната — твоё прошлое. Берегись стрел!"
                 : SIN_NAMES[loc - 1] + ": четыре двери открываются по порядку. Берегись стрел!";
@@ -737,25 +738,116 @@ public class GamePanel extends JPanel implements KeyListener {
         }
     }
 
+    // ====== СПУСК: НАБОР «СЦЕН» ======
+    // Дорога собирается из сцен (сочетаний ловушек). Каждая сцена проходима сама по себе, а между сценами всегда
+    // 3+ свободных клетки, поэтому всю дорогу пройти можно. Порядок и набор сцен случайные, чем глубже — тем больше видов.
+    private static final int SC_DOUBLE = 0, SC_TRIO = 1, SC_BRIDGE = 2, SC_HILL = 3, SC_TURRET = 4,
+            SC_CEIL = 5, SC_SAW = 6, SC_RHYTHM = 7, SC_ROCKS = 8;
+    private static final int[] SCENE_MIN_LEVEL = {1, 3, 2, 2, 1, 2, 3, 1, 1};
+
+    private void buildHardRoad(MapBuilder b, List<java.util.function.Consumer<Room>> tr, int from, int to, int level, Random rnd) {
+        int c = from, last = -1;
+        while (true) {
+            List<Integer> pool = new ArrayList<>();
+            for (int k = 0; k < SCENE_MIN_LEVEL.length; k++) if (k != last && level >= SCENE_MIN_LEVEL[k]) pool.add(k);
+            int kind = pool.get(rnd.nextInt(pool.size()));
+            int width = sceneWidth(kind, level, rnd);
+            if (c + width > to) break;
+            buildScene(kind, c, level, b, tr, rnd);
+            last = kind;
+            c += width + Math.max(3, 5 - level / 3) + rnd.nextInt(2);        // свободный участок между сценами
+        }
+    }
+
+    private int sceneWidth(int kind, int level, Random rnd) {
+        return switch (kind) {
+            case SC_DOUBLE -> 4;
+            case SC_TRIO -> 7;
+            case SC_BRIDGE -> level >= 5 ? 5 : level >= 4 ? 4 : 3;
+            case SC_HILL -> 3;
+            case SC_TURRET -> 5;
+            case SC_CEIL -> 6;
+            case SC_SAW -> 9;
+            case SC_RHYTHM -> level >= 4 ? 10 : 7;
+            default -> 7;                                                      // камни
+        };
+    }
+
+    private void buildScene(int kind, int c, int level, MapBuilder b, List<java.util.function.Consumer<Room>> tr, Random rnd) {
+        int ph = rnd.nextInt(200);
+        switch (kind) {
+            case SC_DOUBLE -> {                       // яма, два шага, шип: два прыжка подряд
+                pit(b, c, c);
+                b.set(c + 3, 9, '^');
+            }
+            case SC_TRIO -> {                         // три ямы с ритмом «прыжок - шаг - прыжок»
+                pit(b, c, c);
+                pit(b, c + 3, c + 3);
+                pit(b, c + 6, c + 6);
+            }
+            case SC_BRIDGE -> {                       // хрупкий мост над ямой; на глубине в нём появляется дыра
+                int n = sceneWidth(kind, level, rnd);
+                pit(b, c, c + n - 1);
+                if (n == 5 && rnd.nextBoolean()) {
+                    for (int k : new int[]{0, 1, 3, 4}) { int col = c + k; tr.add(r -> r.traps.add(Trap.crumble(col, 10))); }
+                } else {
+                    for (int k = 0; k < n; k++) { int col = c + k; tr.add(r -> r.traps.add(Trap.crumble(col, 10))); }
+                }
+            }
+            case SC_HILL -> {                         // холм 1-2-1, на вершине огненная струя: дождись паузы
+                b.set(c, 9, '#');
+                b.set(c + 1, 8, '#');
+                b.set(c + 1, 9, '#');
+                b.set(c + 2, 9, '#');
+                tr.add(r -> r.traps.add(Trap.flame(c + 1, 7, ph)));
+            }
+            case SC_TURRET -> {                       // стрелострел в блоке: стрелы летят низко над полом — перепрыгни и залезь на блок
+                b.set(c + 4, 9, '#');
+                tr.add(r -> r.traps.add(Trap.arrow(c + 4, 9, -1, 0, 5, ph)));
+            }
+            case SC_CEIL -> {                         // стрелы падают с потолка по очереди: между ними есть безопасный карман
+                b.set(c + 1, 1, '#');
+                b.set(c + 4, 1, '#');
+                tr.add(r -> r.traps.add(Trap.arrow(c + 1, 1, 0, 1, 8, 0)));
+                tr.add(r -> r.traps.add(Trap.arrow(c + 4, 1, 0, 1, 8, 85)));
+            }
+            case SC_SAW -> {                          // пила на полу, а за ней шипы, которые выскакивают
+                tr.add(r -> r.traps.add(Trap.saw(c, c + 4, 9)));
+                tr.add(r -> r.traps.add(Trap.hidden(c + 8, 9)));
+            }
+            case SC_RHYTHM -> {                       // шип - скрытые шипы - шип (на глубине ещё одни скрытые)
+                b.set(c, 9, '^');
+                b.set(c + 6, 9, '^');
+                tr.add(r -> r.traps.add(Trap.hidden(c + 3, 9)));
+                if (level >= 4) tr.add(r -> r.traps.add(Trap.hidden(c + 9, 9)));
+            }
+            default -> {                              // два камня в потолке: подойди — задрожит, отойди — упадёт
+                tr.add(r -> r.traps.add(Trap.rock(c + 1, 1)));
+                tr.add(r -> r.traps.add(Trap.rock(c + 5, 1)));
+            }
+        }
+    }
+
     // Дорога спуска между локациями: длинная дорога ловушек вниз. Назад дороги нет.
     private Room road(int loc) {
         int cols = 90 + loc * 4;
         MapBuilder b = MapBuilder.side(cols);
         b.set(1, 9, '.');
-        Random rnd = new Random(loc * 7777L);
-        List<int[]> plan = planRoad(6, cols - 5, Math.min(7, loc + 1), rnd);
-        applyRoadMap(b, plan);
+        Random rnd = new Random(System.nanoTime() ^ (loc * 7777L));   // каждая новая игра — новая дорога
+        List<java.util.function.Consumer<Room>> roadTraps = new ArrayList<>();
+        buildHardRoad(b, roadTraps, 8, cols - 6, loc, rnd);
 
         Room r = new Room("Спуск · " + SIN_NAMES[loc - 1], b.build());
         r.sideView = true;
         r.theme = SIN_THEMES[loc - 1];
         r.title = "СПУСК";
+        r.look = Room.Look.VOID;                               // спуск между локациями — почти чёрный
         r.subtitle = loc < LOCS ? "Дорога ловушек вниз — к локации " + (loc + 1) : "Последний спуск — к самому дну";
         r.goal = Room.Goal.NONE;
         r.exitChar = '2';
         r.exitLocked = false;
         r.addDoor('2', loc < LOCS ? hallKey(loc + 1) : "END", 2, 5);
-        applyRoadTraps(r, plan);
+        for (java.util.function.Consumer<Room> add : roadTraps) add.accept(r);
         return r;
     }
 
@@ -1140,6 +1232,8 @@ public class GamePanel extends JPanel implements KeyListener {
 
     public void stop() {
         timer.stop();
+        adminHide();
+        godMode = false;
         cutscene = null;
         dialog = null;
         dialogProp = null;
@@ -1294,9 +1388,9 @@ public class GamePanel extends JPanel implements KeyListener {
     private void fallInPit() {
         checkTimer = 0;
         checkVase = null;
-        player.hp--;
+        if (!godMode) player.hp--;
         if (player.hp <= 0) { faint(); return; }
-        showMessage("Ты упал в яму! Минус сердце");
+        showMessage("Ты упал в яму!" + (godMode ? "" : " Минус сердце"));
         player.x = safeX;
         player.y = safeY;
         player.vy = 0;
@@ -1448,6 +1542,7 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     private void hurtPlayer(int dmg, int fromX, int fromY) {
+        if (godMode) return;                                  // админ: бессмертие
         checkTimer = 0;
         checkVase = null;
         player.hp -= dmg;
@@ -1752,10 +1847,58 @@ public class GamePanel extends JPanel implements KeyListener {
         g.drawString(text, Room.VIEW_W - w - 12, y);
     }
 
+    // Шкала грехов: 7 меток по порядку локаций (Гнев ... Гордыня).
+    // тусклая — выбор ещё не сделан, светлая с галочкой — добрый поступок, тёмно-красная с крестом — плохой.
+    private void drawSinGauge(Graphics2D g) {
+        int x0 = 196, y0 = 26, w = 22, h = 12, gap = 5;
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(new Color(200, 190, 215));
+        g.drawString("ГРЕХИ", x0, 21);
+        for (int i = 0; i < SIN_THEMES.length; i++) {
+            int x = x0 + i * (w + gap);
+            Theme th = SIN_THEMES[i];
+            int st = sins.state(i);
+            g.setColor(new Color(8, 6, 12));
+            g.fillRect(x - 1, y0 - 1, w + 2, h + 2);                       // рамка
+            if (st == 0) {
+                g.setColor(Theme.mix(th.base, Color.BLACK, 0.78));
+                g.fillRect(x, y0, w, h);
+                g.setColor(Theme.mix(th.base, Color.BLACK, 0.40));
+                g.fillRect(x, y0, w, 2);
+            } else if (st == 1) {
+                g.setColor(Theme.mix(th.accent, Color.WHITE, 0.45));
+                g.fillRect(x, y0, w, h);
+                g.setColor(Color.WHITE);
+                g.fillRect(x, y0, w, 2);
+                g.setColor(new Color(30, 110, 60));                       // галочка
+                g.fillRect(x + 7, y0 + 6, 2, 3);
+                g.fillRect(x + 9, y0 + 8, 2, 2);
+                g.fillRect(x + 11, y0 + 5, 2, 4);
+                g.fillRect(x + 13, y0 + 3, 2, 3);
+            } else {
+                g.setColor(new Color(70, 8, 18));
+                g.fillRect(x, y0, w, h);
+                g.setColor(new Color(150, 20, 34));
+                g.fillRect(x, y0, w, 2);
+                Stroke old = g.getStroke();
+                g.setStroke(new BasicStroke(2f));
+                g.setColor(new Color(255, 80, 80));                       // крест
+                g.drawLine(x + 6, y0 + 3, x + w - 7, y0 + h - 3);
+                g.drawLine(x + w - 7, y0 + 3, x + 6, y0 + h - 3);
+                g.setStroke(old);
+            }
+        }
+        int bad = sins.badCount();
+        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setColor(bad >= Sins.HELL_LIMIT - 1 ? new Color(255, 100, 100) : new Color(210, 200, 225));
+        g.drawString("Ад " + bad + "/" + Sins.HELL_LIMIT, x0 + SIN_THEMES.length * (w + gap) + 4, y0 + 10);
+    }
+
     private void drawHud(Graphics2D g) {
         g.setColor(new Color(0, 0, 0, 110));
         g.fillRect(0, 0, Room.VIEW_W, 76);
         for (int i = 0; i < player.maxHp; i++) drawHeart(g, 12 + i * 26, 10, i < player.hp);
+        drawSinGauge(g);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 16));
         g.setColor(Color.WHITE);
@@ -1895,6 +2038,223 @@ public class GamePanel extends JPanel implements KeyListener {
         }
     }
 
+    // ================= АДМИН-ПАНЕЛЬ (Ctrl+Shift+5) =================
+    // Окно с кнопками лежит в Main.java (класс AdminPanel), а вся логика — здесь, чтобы иметь доступ к состоянию игры.
+    private AdminPanel admin;
+    private boolean godMode;                                  // бессмертие: удары и ямы не отнимают сердца
+
+    // Ctrl+Shift+5 — по коду клавиши, по расширенному коду (другие раскладки) и по символу ('5' / '%'), плюс цифра на NumPad
+    static boolean isAdminCombo(KeyEvent e) {
+        if (!e.isControlDown() || !e.isShiftDown()) return false;
+        char ch = e.getKeyChar();
+        return e.getKeyCode() == KeyEvent.VK_5 || e.getKeyCode() == KeyEvent.VK_NUMPAD5
+                || e.getExtendedKeyCode() == KeyEvent.VK_5 || ch == '5' || ch == '%';
+    }
+
+    // Ловим сочетание на уровне всего окна, а не только когда фокус на игровой панели
+    // (фокус легко уходит на кнопку или диалог, и тогда обычный KeyListener молчит).
+    private final KeyEventDispatcher adminHotkey = ev -> {
+        if (ev.getID() == KeyEvent.KEY_PRESSED && isShowing() && isAdminCombo(ev)) {
+            toggleAdmin();
+            return true;                                      // нажатие «съедено», дальше в игру не идёт
+        }
+        return false;
+    };
+
+    @Override public void addNotify() {
+        super.addNotify();
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(adminHotkey);
+    }
+
+    @Override public void removeNotify() {
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(adminHotkey);
+        super.removeNotify();
+    }
+
+    private void toggleAdmin() {
+        if (current == null) return;
+        try {
+            if (admin == null) admin = new AdminPanel(this, window);
+            if (admin.isVisible()) {
+                admin.close();
+                showMessage("Админ-панель закрыта");
+            } else {
+                admin.open();
+                showMessage("Админ-панель открыта (Ctrl+Shift+5 — закрыть)");
+            }
+        } catch (Throwable ex) {                              // не молчим: показываем причину прямо на экране
+            ex.printStackTrace();
+            admin = null;
+            showMessage("Админ-панель не открылась: " + ex);
+            try {
+                java.io.StringWriter sw = new java.io.StringWriter();
+                ex.printStackTrace(new java.io.PrintWriter(sw));
+                JOptionPane.showMessageDialog(this, sw.toString(), "Ошибка админ-панели", JOptionPane.ERROR_MESSAGE);
+            } catch (Throwable ignore) { }
+        }
+        requestFocusInWindow();
+    }
+
+    private void adminHide() { if (admin != null) admin.close(); }
+
+    // сбрасывает всё «временное» состояние перед скачком в другое место
+    private void adminReset() {
+        cutscene = null;
+        dialog = null;
+        dialogProp = null;
+        mashProp = null;
+        mashDown.clear();
+        checkTimer = 0;
+        checkVase = null;
+        invOpen = false;
+        up = down = left = right = jump = false;
+    }
+
+    // номер локации по ключу комнаты (h3, road3, r3_1, s3); -1 — не принадлежит локации
+    private static int locOf(String key) {
+        if (key == null) return -1;
+        int[] id = parseTrial(key);
+        if (id != null) return id[0];
+        if (key.matches("h[1-7]")) return key.charAt(1) - '0';
+        if (key.matches("road[1-7]")) return key.charAt(4) - '0';
+        return -1;
+    }
+
+    private void teleportTo(Room r, int col, int row) {
+        adminReset();
+        won = false;
+        enterRoom(r);
+        respawnCol = col;
+        respawnRow = row;
+        player.setTile(col, row);
+        player.vy = 0;
+        player.onGround = false;
+        player.invul = 60;
+        player.facing = r.sideView ? Player.Dir.RIGHT : Player.Dir.DOWN;
+        safeX = player.x;
+        safeY = player.y;
+        if (pet != null && !pet.onShoulder) { pet.x = player.x; pet.y = player.y; }
+        snapCamera();
+    }
+
+    // ставит игрока на клетку с символом ch (дверь выхода); false — такой клетки в комнате нет
+    private boolean teleportToTile(char ch) {
+        for (int r = 0; r < current.rows(); r++) {
+            for (int c = 0; c < current.cols(); c++) {
+                if (current.tileAt(c, r) != ch) continue;
+                player.setTile(c, r);
+                player.vy = 0;
+                player.onGround = false;
+                safeX = player.x;
+                safeY = player.y;
+                snapCamera();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // засчитывает все комнаты локации и открывает дверь СПУСК
+    private void completeLocation(int loc) {
+        Room hall = rooms.get(hallKey(loc));
+        for (int n = 1; n <= 4; n++) {
+            if (loc == LOCS && n < 4) continue;               // у Гордыни одна комната
+            String key = trialKey(loc, n);
+            done.add(key);
+            hall.doneDoors.add((char) ('0' + n));
+            sins.good(key);                                   // для комнат-грехов пропуск = добрый исход
+        }
+        refreshHallLocks(loc);
+        hall.exitLocked = false;
+    }
+
+    // ----- то, что вызывает AdminPanel -----
+    boolean adminGod() { return godMode; }
+
+    void adminSetGod(boolean on) {
+        godMode = on;
+        showMessage("Админ: бессмертие " + (on ? "включено" : "выключено"));
+    }
+
+    void adminHeal() {
+        player.hp = player.maxHp;
+        slowTimer = poisonTimer = darkTimer = weakTimer = 0;
+        slowPermanent = false;
+        showMessage("Админ: сердца восстановлены, эффекты сняты");
+    }
+
+    String adminStatus() {
+        if (current == null) return " ";
+        return "<html>" + current.name + " [" + current.key + "]<br>Плохих поступков: " + sins.badCount()
+                + " · добрых: " + sins.goodCount() + (godMode ? " · БЕССМЕРТИЕ" : "") + "</html>";
+    }
+
+    // все комнаты по порядку прохождения
+    java.util.List<String> adminRoomKeys() {
+        List<String> out = new ArrayList<>();
+        for (int loc = 1; loc <= LOCS; loc++) {
+            out.add(hallKey(loc));
+            if (loc != LOCS) for (int n = 1; n <= 3; n++) out.add(trialKey(loc, n));
+            out.add(trialKey(loc, 4));
+            out.add(roadKey(loc));
+        }
+        out.removeIf(k -> !rooms.containsKey(k));
+        return out;
+    }
+
+    String adminRoomName(String key) {
+        Room r = rooms.get(key);
+        return r == null ? key : r.name;
+    }
+
+    // телепорт в начало комнаты (в коридор — туда, где игра стартует; в остальные — как после входа в дверь)
+    void adminGoto(String key) {
+        Room r = rooms.get(key);
+        if (r == null) return;
+        if (isHall(r)) teleportTo(r, 2, 5); else teleportTo(r, 3, 9);
+        showMessage("Админ: телепорт — " + r.name);
+    }
+
+    // пропустить текущее испытание: выбор делается «добрым», выход открывается, игрок встаёт на дверь
+    void adminSkipRoom() {
+        if (current == null || won) return;
+        if (isHall(current)) { adminSkipLocation(); return; }
+        adminReset();
+        Decision c = current.choice;
+        if (c != null && !c.decided) resolveChoice(c, c.optE.good() ? c.optE : c.optL);
+        current.exitLocked = false;
+        if (!teleportToTile(current.exitChar)) {
+            showMessage("Админ: выход открыт, но двери в этой комнате нет");
+            return;
+        }
+        showMessage("Админ: комната пропущена");
+    }
+
+    // пройти все четыре комнаты текущей локации и встать у двери СПУСК
+    void adminSkipLocation() {
+        if (current == null || won) return;
+        int loc = locOf(current.key);
+        if (loc < 0) return;
+        completeLocation(loc);
+        if (!current.key.startsWith("road")) teleportTo(rooms.get(hallKey(loc)), HALL_COLS - 4, 6);
+        showMessage("Админ: локация " + loc + " пройдена, дверь СПУСК открыта");
+    }
+
+    // засчитать все 7 локаций (двери коридоров открыты, дальше можно идти вручную или телепортом)
+    void adminSkipAll() {
+        if (current == null) return;
+        for (int loc = 1; loc <= LOCS; loc++) completeLocation(loc);
+        showMessage("Админ: все испытания засчитаны");
+    }
+
+    // финал: forced = null — концовка по реальным выборам, иначе принудительно Рай / Ад
+    void adminFinish(Sins.Ending forced) {
+        if (current == null) return;
+        adminReset();
+        ending = forced != null ? forced : sins.ending();
+        won = true;
+    }
+
     // ================= КЛАВИШИ =================
     // Буквы проверяем и по коду клавиши, и по символу — чтобы L и E работали и на русской раскладке (Д, У).
     private static boolean isKey(KeyEvent e, int code, char ru) {
@@ -1904,6 +2264,11 @@ public class GamePanel extends JPanel implements KeyListener {
     @Override
     public void keyPressed(KeyEvent e) {
         int k = e.getKeyCode();
+
+        if (isAdminCombo(e)) {                                           // админ-панель — Ctrl+Shift+5
+            toggleAdmin();
+            return;
+        }
 
         if (cutscene != null) {
             if (k == KeyEvent.VK_ESCAPE) cutscene.skip();

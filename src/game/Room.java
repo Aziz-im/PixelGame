@@ -50,6 +50,9 @@ public class Room {
     public final Set<Character> lockedDoors = new HashSet<>();   // двери, которые пока заперты (коридор)
 
     public Theme theme = Theme.TUTORIAL;             // цвет и атмосфера локации
+    // оформление: GALLERY — кирпичная галерея с лампами (комнаты), VOID — почти чёрное (спуски и коридоры), CLASSIC — старый вид
+    public enum Look { CLASSIC, GALLERY, VOID }
+    public Look look = Look.GALLERY;
     public String title, subtitle;                   // заставка при входе
     public int wind;                                 // >0 — течение тянет игрока влево (Лень)
     public int gateCol = -1;                         // колонка ворот 'G' (-1 = нет)
@@ -161,8 +164,8 @@ public class Room {
         int r1 = Math.min(rows(), (camY + VIEW_H) / TILE + 1);
 
         if (sideView) {
-            drawSideBackground(g, camX, camY, c0, c1);
-            drawParticles(g, camX, camY, tick);
+            drawSideBackground(g, camX, camY, c0, c1, tick);
+            if (look != Look.VOID) drawParticles(g, camX, camY, tick);
         } else {
             g.setColor(new Color(20, 28, 44));
             g.fillRect(camX, camY, VIEW_W, VIEW_H);
@@ -201,6 +204,7 @@ public class Room {
             }
         }
 
+        if (sideView && look == Look.GALLERY) drawGalleryFront(g, camX);
         for (Trap t : traps) t.draw(g, tick, theme);
         for (Sign s : signs) drawSign(g, s);
         for (Prop p : props) p.draw(g, tick);
@@ -211,7 +215,9 @@ public class Room {
     }
 
     // ---------- атмосфера комнат сбоку ----------
-    private void drawSideBackground(Graphics2D g, int camX, int camY, int c0, int c1) {
+    private void drawSideBackground(Graphics2D g, int camX, int camY, int c0, int c1, int tick) {
+        if (look == Look.GALLERY) { drawGalleryBackground(g, camX, camY, tick); return; }
+        if (look == Look.VOID) { drawVoidBackground(g, camX, camY); return; }
         g.setPaint(new GradientPaint(0, camY, theme.skyTop, 0, camY + VIEW_H, theme.skyBottom));
         g.fillRect(camX, camY, VIEW_W, VIEW_H);
         g.setColor(new Color(255, 255, 255, 10));                    // светлая полоса-панель на стене
@@ -310,6 +316,8 @@ public class Room {
     }
 
     private void drawSideWall(Graphics2D g, int x, int y, int col, int row) {
+        if (look == Look.GALLERY) { drawGalleryWall(g, x, y, col, row); return; }
+        if (look == Look.VOID) { drawVoidWall(g, x, y, col, row); return; }
         boolean surface = tileAt(col, row - 1) != '#';
         if (surface) {                                               // верхняя грань пола / платформы
             g.setColor(theme.wallTop);
@@ -533,34 +541,291 @@ public class Room {
         g.drawString(text, x + TILE / 2 - w / 2, ty);
     }
 
+    // ================= ОФОРМЛЕНИЕ: «ГАЛЕРЕЯ» (комнаты) и «ПУСТОТА» (спуски, коридоры) =================
+    private static final int LP = 480, LO = 200;      // период узора по X и сдвиг первой лампы
+
+    // кладка: ряды кирпичей 36x17, привязаны к мировым координатам (при прокрутке не «плывут»)
+    private static void bricks(Graphics2D g, int x0, int x1, int y0, int y1, Color brick, Color mortar, Color brick2) {
+        g.setColor(mortar);
+        g.fillRect(x0, y0, x1 - x0, y1 - y0);
+        int bh = 17, bw = 36, rowN = 0;
+        for (int y = y0; y < y1; y += bh, rowN++) {
+            int off = (rowN % 2) * (bw / 2);
+            int hh = Math.min(bh - 2, y1 - y - 1);
+            int start = x0 - Math.floorMod(x0 - off, bw);
+            for (int bx = start; bx < x1; bx += bw) {
+                g.setColor(Math.floorMod(Math.floorDiv(bx, bw) * 7 + rowN * 5, 3) == 0 ? brick2 : brick);
+                int a = Math.max(bx + 1, x0), b = Math.min(bx + bw - 1, x1);
+                if (b > a && hh > 0) g.fillRect(a, y + 1, b - a, hh);
+            }
+        }
+    }
+
+    // пунктирная линия с «засечками»
+    private static void dashedLine(Graphics2D g, int x0, int x1, int y, Color c, int th) {
+        g.setColor(c);
+        int seg = 60;
+        for (int sx = x0 - Math.floorMod(x0, seg); sx < x1; sx += seg) {
+            int len = 50 + Math.floorMod(Math.floorDiv(sx, seg) * 13, 6);
+            g.fillRect(sx, y, len, th);
+            g.fillRect(sx + len + 2, y - 2, 2, th + 4);
+        }
+    }
+
+    // освещённость пола под лампами: 0 — тень, 1 — центр светового пятна
+    private double lampLight(int worldX) {
+        int m = Math.floorMod(worldX - LO, LP);
+        return Math.max(0, 1 - Math.min(m, LP - m) / 170.0);
+    }
+
+    private void plaque(Graphics2D g, int x, int y, int w, int h) {
+        g.setColor(Theme.mix(theme.base, Color.BLACK, 0.55));
+        g.fillRect(x - 3, y - 3, w + 6, h + 6);
+        g.setColor(Theme.mix(theme.base, Color.BLACK, 0.80));
+        g.fillRect(x, y, w, h);
+        g.setColor(Theme.alpha(theme.accent, 50));
+        for (int i = 0; i < w - 6; i += 8) {
+            g.fillRect(x + i + 3, y + 4, 3, 3);
+            g.fillRect(x + i + 3, y + h - 7, 3, 3);
+        }
+    }
+
+    private void drawGalleryBackground(Graphics2D g, int camX, int camY, int tick) {
+        Color deep = Theme.mix(theme.base, Color.BLACK, 0.82);
+        Color wall = Theme.mix(theme.base, Color.BLACK, 0.62);
+        Color brick = Theme.mix(theme.base, Color.BLACK, 0.36);
+        Color brick2 = Theme.mix(theme.base, Color.BLACK, 0.44);
+        Color mortar = Theme.mix(theme.base, Color.BLACK, 0.72);
+        int floorY = (rows() - 2) * TILE;
+        int xa = camX, xb = camX + VIEW_W;
+
+        g.setPaint(new GradientPaint(0, camY, deep, 0, camY + VIEW_H, wall));
+        g.fillRect(xa, camY, VIEW_W, VIEW_H);
+
+        // слабая кладка на гладкой стене между панелями
+        Color fb = Theme.mix(wall, brick, 0.22), fm = Theme.mix(wall, Color.BLACK, 0.30);
+        bricks(g, xa, xb, 126, 177, fb, fm, fb);
+        bricks(g, xa, xb, 400, floorY, fb, fm, fb);
+
+        // кирпичные панели с нишами
+        for (int k = Math.floorDiv(xa - LO, LP) - 1; k <= Math.floorDiv(xb - LO, LP) + 1; k++) {
+            int px = LO + k * LP + 91, pw = 158;
+            bricks(g, px, px + pw, 75, 379, brick, mortar, brick2);
+            g.setColor(Theme.mix(theme.base, Color.WHITE, 0.12));            // карниз
+            g.fillRect(px - 4, 379, pw + 8, 5);
+            bricks(g, px, px + pw, 384, floorY, Theme.mix(brick, Color.BLACK, 0.45),
+                    Theme.mix(mortar, Color.BLACK, 0.4), Theme.mix(brick2, Color.BLACK, 0.45));
+            g.setColor(new Color(0, 0, 0, 95));                               // тень сбоку панели
+            g.fillRect(px + pw, 75, 22, 375);
+            plaque(g, px + 54, 169, 54, 167);
+            plaque(g, px + 44, 397, 70, 44);
+        }
+
+        // потолок: тёмная решётка с рельсом
+        g.setColor(Theme.mix(theme.base, Color.BLACK, 0.92));
+        g.fillRect(xa, camY, VIEW_W, 75);
+        g.setColor(new Color(255, 255, 255, 14));
+        for (int y = 3; y < 48; y += 8)
+            for (int x = xa - Math.floorMod(xa, 8); x < xb; x += 8) g.fillRect(x, y, 2, 2);
+        g.setColor(new Color(6, 2, 3));
+        g.fillRect(xa, 50, VIEW_W, 5);
+        g.setColor(Theme.mix(theme.base, Color.BLACK, 0.35));
+        g.fillRect(xa, 71, VIEW_W, 3);
+
+        // лампы с конусами света
+        for (int k = Math.floorDiv(xa - LO, LP) - 1; k <= Math.floorDiv(xb - LO, LP) + 1; k++) {
+            int cx = LO + k * LP;
+            g.setColor(Theme.alpha(Theme.mix(theme.base, theme.accent, 0.35), 36));
+            g.fillPolygon(new int[]{cx - 20, cx + 20, cx + 150, cx - 150}, new int[]{122, 122, floorY, floorY}, 4);
+            g.setColor(new Color(10, 4, 6));
+            g.fillRect(cx - 1, 54, 3, 28);
+            g.setColor(new Color(34, 20, 44));
+            g.fillPolygon(new int[]{cx - 8, cx + 8, cx + 24, cx - 24}, new int[]{80, 80, 104, 104}, 4);
+            g.fillRect(cx - 10, 78, 20, 4);
+            boolean on = (tick / 9 + k) % 13 != 0;                            // лампа изредка мигает
+            for (int i = 0; i < 4; i++) {
+                Color c = i % 2 == 0 ? theme.accent : Theme.mix(theme.accent, Color.WHITE, 0.4);
+                g.setColor(on ? c : Theme.mix(c, theme.base, 0.6));
+                g.fillRect(cx - 15 + i * 8, 106, 5, 14 + (i % 2) * 8);
+            }
+        }
+    }
+
+    // постаменты стоят перед фоном: низ уходит в плитку пола
+    private void drawGalleryFront(Graphics2D g, int camX) {
+        int c = pedestalCol();
+        if (c >= 0) pedestal(g, c * TILE + TILE / 2, true);       // максимум один постамент на комнату
+    }
+
+    // колонка для постамента: ближе к середине комнаты, где рядом нет ловушек, ям, блоков, дверей и предметов
+    private int pedestalCol() {
+        int best = -1;
+        for (int c = 2; c < cols() - 2; c++) {
+            if (!pedestalFree(c)) continue;
+            if (best < 0 || Math.abs(c - cols() / 2) < Math.abs(best - cols() / 2)) best = c;
+        }
+        return best;
+    }
+
+    private boolean pedestalFree(int c) {
+        for (int k = c - 2; k <= c + 2; k++) {
+            if (k < 0 || k >= cols()) return false;
+            if (map[9].charAt(k) != '.' || map[10].charAt(k) != '#') return false;   // только чистый пол
+        }
+        for (Trap t : traps) if (c >= t.minCol() - 2 && c <= t.maxCol() + 2) return false;
+        for (Sign s : signs) if (Math.abs(s.col() - c) <= 2) return false;
+        for (Prop p : props) if (Math.abs(p.col - c) <= 3) return false;
+        if (choice != null && Math.abs(choice.col - c) <= 4) return false;
+        return true;
+    }
+
+    // подземелье: чёрный камень, чёткие пиксельные грани, никаких полупрозрачных пятен
+    private void pedestal(Graphics2D g, int cx, boolean lit) {
+        Color stone   = new Color(16, 15, 21);
+        Color stoneHi = new Color(48, 46, 58);     // светлая грань слева и сверху
+        Color stoneLo = new Color(7, 6, 9);        // тёмная грань справа и снизу
+        Color seam    = new Color(8, 7, 11);       // швы кладки
+        Color trim    = lit ? Theme.mix(theme.accent, Color.BLACK, 0.15) : new Color(70, 66, 80);
+
+        // тень на полу
+        g.setColor(new Color(0, 0, 0, 120));
+        g.fillRect(cx - 30, 506, 60, 4);
+
+        // основание
+        g.setColor(stone);
+        g.fillRect(cx - 28, 486, 56, 20);
+        g.setColor(stoneHi);
+        g.fillRect(cx - 28, 486, 56, 2);
+        g.fillRect(cx - 28, 486, 2, 20);
+        g.setColor(stoneLo);
+        g.fillRect(cx + 26, 488, 2, 18);
+        g.fillRect(cx - 28, 504, 56, 2);
+
+        // ножка: кладка из чёрных блоков
+        g.setColor(stone);
+        g.fillRect(cx - 15, 430, 30, 56);
+        g.setColor(seam);
+        for (int i = 0; i < 4; i++) {
+            int top = 430 + i * 14;
+            if (i > 0) g.fillRect(cx - 15, top, 30, 2);
+            g.fillRect(i % 2 == 0 ? cx - 4 : cx + 5, top + (i > 0 ? 2 : 0), 2, i > 0 ? 12 : 14);
+        }
+        g.setColor(stoneHi);
+        g.fillRect(cx - 15, 430, 2, 56);
+        g.setColor(stoneLo);
+        g.fillRect(cx + 13, 430, 2, 56);
+
+        // у зажжённых — тонкая светящаяся прорезь
+        if (lit) {
+            g.setColor(Theme.mix(theme.accent, Color.BLACK, 0.45));
+            g.fillRect(cx - 3, 446, 6, 28);
+            g.setColor(theme.accent);
+            g.fillRect(cx - 1, 446, 2, 28);
+        }
+
+        // шапка
+        g.setColor(new Color(4, 3, 6));
+        g.fillRect(cx - 15, 430, 30, 4);            // тень под шапкой
+        g.setColor(new Color(22, 20, 28));
+        g.fillRect(cx - 28, 414, 56, 16);
+        g.setColor(trim);
+        g.fillRect(cx - 28, 414, 56, 3);
+        g.setColor(stoneHi);
+        g.fillRect(cx - 28, 417, 2, 13);
+        g.setColor(stoneLo);
+        g.fillRect(cx + 26, 417, 2, 13);
+        g.fillRect(cx - 28, 428, 56, 2);
+    }
+
+    private void drawGalleryWall(Graphics2D g, int x, int y, int col, int row) {
+        boolean surface = tileAt(col, row - 1) != '#';
+        if (surface) {                                                        // плитка пола / верх платформы
+            Color f = Theme.mix(theme.base, Color.BLACK, 0.52);
+            double lit = lampLight(x + TILE / 2);
+            Color c = Theme.mix(f, Theme.mix(theme.accent, theme.base, 0.25), 0.55 * lit);
+            g.setColor(c);
+            g.fillRect(x, y, TILE, TILE);
+            g.setColor(Theme.mix(c, Color.BLACK, 0.38));                      // швы плит
+            g.fillRect(x, y + 22, TILE, 2);
+            g.fillRect(x + ((col + row) % 2) * 20 + 10, y, 2, 22);
+            g.fillRect(x + ((col + row) % 2) * 20 + 30, y + 24, 2, TILE - 24);
+            g.setColor(Theme.mix(c, Color.WHITE, 0.22));                      // верхняя грань — по ней идти
+            g.fillRect(x, y, TILE, 3);
+            g.setColor(Theme.mix(theme.accent, theme.base, 0.2));             // яркая кромка снизу
+            g.fillRect(x, y + TILE - 3, TILE, 3);
+        } else {                                                              // тёмная масса под полом / стена
+            g.setColor(Theme.mix(theme.base, Color.BLACK, 0.88));
+            g.fillRect(x, y, TILE, TILE);
+            g.setColor(new Color(255, 255, 255, 13));
+            for (int yy = 3; yy < TILE; yy += 8)
+                for (int xx = 3; xx < TILE; xx += 8) g.fillRect(x + xx, y + yy, 2, 2);
+        }
+    }
+
+    private void drawVoidBackground(Graphics2D g, int camX, int camY) {
+        int xa = camX, xb = camX + VIEW_W, floorY = (rows() - 2) * TILE;
+        g.setPaint(new GradientPaint(0, camY, new Color(4, 7, 10), 0, camY + VIEW_H, new Color(9, 13, 16)));
+        g.fillRect(xa, camY, VIEW_W, VIEW_H);
+        bricks(g, xa, xb, 156, 192, new Color(17, 22, 25), new Color(9, 13, 15), new Color(15, 20, 23));
+        for (int k = Math.floorDiv(xa - 185, 540) - 1; k <= Math.floorDiv(xb - 185, 540) + 1; k++) {
+            int px = 185 + k * 540;
+            bricks(g, px, px + 50, 216, floorY, new Color(19, 25, 28), new Color(10, 14, 16), new Color(17, 22, 25));
+        }
+        dashedLine(g, xa, xb, 96, new Color(66, 76, 80, 170), 4);
+    }
+
+    private void drawVoidWall(Graphics2D g, int x, int y, int col, int row) {
+        boolean surface = tileAt(col, row - 1) != '#';
+        g.setColor(surface ? new Color(13, 17, 20) : new Color(5, 8, 10));
+        g.fillRect(x, y, TILE, TILE);
+        g.setColor(new Color(76, 86, 90));                                    // бледная пунктирная кромка у границы с воздухом
+        if (surface) { g.fillRect(x + 1, y, 22, 4); g.fillRect(x + 26, y, 21, 4); }
+        if (tileAt(col - 1, row) != '#') { g.fillRect(x, y + 2, 4, 20); g.fillRect(x, y + 26, 4, 20); }
+        if (tileAt(col + 1, row) != '#') { g.fillRect(x + TILE - 4, y + 2, 4, 20); g.fillRect(x + TILE - 4, y + 26, 4, 20); }
+    }
+
+    // в «пустоте» подвал затемняется: стены и пол почти чёрные, двери читаются по цветной полосе
+    private Color d(Color c)  { return look == Look.VOID ? Theme.mix(c, new Color(3, 6, 8), 0.80) : c; }
+    private Color dd(Color c) { return look == Look.VOID ? Theme.mix(c, new Color(3, 6, 8), 0.50) : c; }
+
     // ---------- подвал: кирпичные стены, каменный пол, железные двери ----------
     private void drawBrickWall(Graphics2D g, int x, int y, int col, int row) {
-        g.setColor(new Color(38, 28, 28));                         // раствор между кирпичами
+        boolean vd = look == Look.VOID;
+        g.setColor(vd ? new Color(6, 10, 12) : new Color(38, 28, 28));   // раствор между кирпичами
         g.fillRect(x, y, TILE, TILE);
         for (int i = 0; i < 4; i++) {                              // 4 ряда кирпичей по 12 px
             int off = ((row * 4 + i) % 2) * 12;
             for (int j = -1; j < 3; j++) {
                 int bx = x + j * 24 + off;
                 int tone = ((col * 7 + row * 13 + i * 5 + j * 3) % 3 + 3) % 3 * 8;
-                g.setColor(new Color(112 + tone, 52 + tone / 2, 42 + tone / 2));
+                g.setColor(vd ? new Color(13 + tone / 3, 19 + tone / 3, 21 + tone / 3)
+                        : new Color(112 + tone, 52 + tone / 2, 42 + tone / 2));
                 int x0 = Math.max(bx + 1, x), x1 = Math.min(bx + 23, x + TILE);
                 if (x1 > x0) g.fillRect(x0, y + i * 12 + 1, x1 - x0, 10);
             }
         }
-        if (tileAt(col, row - 1) != '#') {                         // светлая верхняя грань стены
+        if (look == Look.VOID) {                                   // бледная пунктирная кромка у границы с полом
+            g.setColor(new Color(76, 86, 90, 160));
+            if (tileAt(col, row - 1) != '#') { g.fillRect(x + 1, y, 22, 3); g.fillRect(x + 26, y, 21, 3); }
+            if (tileAt(col, row + 1) != '#') { g.fillRect(x + 1, y + TILE - 3, 22, 3); g.fillRect(x + 26, y + TILE - 3, 21, 3); }
+            if (tileAt(col - 1, row) != '#') { g.fillRect(x, y + 2, 3, 20); g.fillRect(x, y + 26, 3, 20); }
+            if (tileAt(col + 1, row) != '#') { g.fillRect(x + TILE - 3, y + 2, 3, 20); g.fillRect(x + TILE - 3, y + 26, 3, 20); }
+        } else if (tileAt(col, row - 1) != '#') {                  // светлая верхняя грань стены
             g.setColor(new Color(150, 92, 72));
             g.fillRect(x, y, TILE, 3);
         }
     }
 
     private void drawBasementFloor(Graphics2D g, int x, int y, int col, int row) {
-        g.setColor((col + row) % 2 == 0 ? new Color(60, 56, 58) : new Color(54, 50, 52));
+        boolean vd = look == Look.VOID;
+        g.setColor(vd ? ((col + row) % 2 == 0 ? new Color(12, 17, 20) : new Color(10, 14, 17))
+                : ((col + row) % 2 == 0 ? new Color(60, 56, 58) : new Color(54, 50, 52)));
         g.fillRect(x, y, TILE, TILE);
-        g.setColor(new Color(36, 32, 34));                         // швы плит
+        g.setColor(vd ? new Color(5, 8, 10) : new Color(36, 32, 34));   // швы плит
         g.fillRect(x, y, TILE, 2);
         g.fillRect(x, y, 2, TILE);
         if ((col * 7 + row * 13) % 5 == 0) {                       // сырое пятно
-            g.setColor(new Color(40, 46, 52));
+            g.setColor(vd ? new Color(16, 22, 26) : new Color(40, 46, 52));
             g.fillOval(x + 12, y + 14, 22, 12);
         }
     }
@@ -571,17 +836,17 @@ public class Room {
             g.setColor(Theme.alpha(tint, 70));
             g.fillRect(x - 4, y - 4, TILE + 8, TILE + 8);
         }
-        g.setColor(new Color(34, 38, 46));
+        g.setColor(dd(new Color(34, 38, 46)));
         g.fillRect(x + 2, y + 2, TILE - 4, TILE - 2);              // рама
-        g.setColor(new Color(92, 100, 112));
+        g.setColor(dd(new Color(92, 100, 112)));
         g.fillRect(x + 6, y + 6, TILE - 12, TILE - 8);             // плита
         g.setColor(tint != null ? tint : new Color(120, 130, 144));
         g.fillRect(x + 6, y + 6, TILE - 12, 3);                    // полоса цвета греха
-        g.setColor(new Color(60, 66, 78));
+        g.setColor(dd(new Color(60, 66, 78)));
         g.fillRect(x + TILE / 2 - 1, y + 10, 2, TILE - 12);        // шов створок
         g.setColor(new Color(14, 14, 20));
         g.fillRect(x + 14, y + 13, 20, 10);                        // окошко
-        g.setColor(new Color(150, 158, 170));
+        g.setColor(dd(new Color(150, 158, 170)));
         for (int i = 0; i < 3; i++) g.fillRect(x + 18 + i * 6, y + 13, 2, 10);   // прутья
         for (int i = 0; i < 2; i++) {                              // заклёпки
             g.fillRect(x + 9, y + 29 + i * 9, 3, 3);
@@ -609,3 +874,6 @@ public class Room {
         g.setStroke(old);
     }
 }
+
+// Дверь: куда ведёт и где появится игрок
+record Door(String targetRoom, int spawnCol, int spawnRow) {}

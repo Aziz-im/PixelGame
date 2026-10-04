@@ -37,6 +37,12 @@ public class Sins {
         if (i >= 0 && !bad[i]) good[i] = true;
     }
 
+    // состояние метки комнаты-греха i (0..6) для шкалы грехов: 0 — ещё не решено, 1 — добрый поступок, 2 — плохой
+    public int state(int i) {
+        if (i < 0 || i >= bad.length) return 0;
+        return bad[i] ? 2 : good[i] ? 1 : 0;
+    }
+
     public int badCount() {
         int n = 0;
         for (boolean b : bad) if (b) n++;

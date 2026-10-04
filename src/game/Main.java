@@ -512,3 +512,127 @@ class Cutscene {
         g.setComposite(old);
     }
 }
+
+
+// Админ-панель (Ctrl+Shift+5): пропуск испытаний и телепорт. Окно не забирает фокус у игры,
+// поэтому с открытой панелью можно продолжать играть. Закрыть — той же комбинацией или крестиком.
+class AdminPanel extends JDialog {
+    private final GamePanel game;
+    private final JLabel status = new JLabel(" ");
+    private final JComboBox<String> rooms = new JComboBox<>();
+    private final JCheckBox god = new JCheckBox("Бессмертие");
+    private final javax.swing.Timer refresher;
+
+    AdminPanel(GamePanel game, Window owner) {
+        super(owner);
+        this.game = game;
+        setTitle("Админ-панель");
+        setAlwaysOnTop(true);
+        setFocusableWindowState(false);
+        setResizable(false);
+        setDefaultCloseOperation(HIDE_ON_CLOSE);
+        refresher = new javax.swing.Timer(300, e -> status.setText(game.adminStatus()));
+
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
+        p.setBackground(new Color(28, 28, 46));
+
+        status.setFont(new Font("Monospaced", Font.BOLD, 12));
+        status.setForeground(new Color(240, 200, 60));
+        status.setAlignmentX(Component.LEFT_ALIGNMENT);
+        status.setPreferredSize(new Dimension(320, 34));
+        status.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        p.add(status);
+
+        section(p, "ПРОПУСК ИСПЫТАНИЙ");
+        button(p, "Пропустить эту комнату", game::adminSkipRoom);
+        button(p, "Пройти всю локацию", game::adminSkipLocation);
+        button(p, "Засчитать ВСЕ испытания", game::adminSkipAll);
+
+        section(p, "ТЕЛЕПОРТ");
+        rooms.setFocusable(false);
+        rooms.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        rooms.setPrototypeDisplayValue("road7 — Спуск · Чревоугодие");
+        rooms.setAlignmentX(Component.LEFT_ALIGNMENT);
+        rooms.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(rooms);
+        p.add(Box.createVerticalStrut(4));
+        button(p, "Телепорт в выбранную комнату", () -> {
+            Object it = rooms.getSelectedItem();
+            if (it != null) game.adminGoto(it.toString().split(" ")[0]);
+        });
+
+        section(p, "К КОНЦУ ИГРЫ");
+        button(p, "Последний спуск (локация 7)", () -> game.adminGoto("road7"));
+        button(p, "Финал: по текущим выборам", () -> game.adminFinish(null));
+        button(p, "Финал: РАЙ", () -> game.adminFinish(Sins.Ending.HEAVEN));
+        button(p, "Финал: АД", () -> game.adminFinish(Sins.Ending.HELL));
+
+        section(p, "ПРОЧЕЕ");
+        god.setFocusable(false);
+        god.setOpaque(false);
+        god.setForeground(Color.WHITE);
+        god.setFont(new Font("Monospaced", Font.BOLD, 13));
+        god.setAlignmentX(Component.LEFT_ALIGNMENT);
+        god.addActionListener(e -> game.adminSetGod(god.isSelected()));
+        p.add(god);
+        p.add(Box.createVerticalStrut(4));
+        button(p, "Вылечить и снять эффекты", game::adminHeal);
+
+        setContentPane(p);
+    }
+
+    private static void section(JPanel p, String text) {
+        p.add(Box.createVerticalStrut(8));
+        JLabel l = new JLabel(text);
+        l.setFont(new Font("Monospaced", Font.BOLD, 12));
+        l.setForeground(new Color(150, 150, 190));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        p.add(l);
+        p.add(Box.createVerticalStrut(4));
+    }
+
+    private static void button(JPanel p, String text, Runnable action) {
+        JButton b = new JButton(text);
+        b.setFont(new Font("Monospaced", Font.BOLD, 13));
+        b.setForeground(Color.WHITE);
+        b.setBackground(new Color(60, 60, 110));
+        b.setOpaque(true);
+        b.setBorderPainted(false);
+        b.setFocusPainted(false);
+        b.setFocusable(false);
+        b.setAlignmentX(Component.LEFT_ALIGNMENT);
+        b.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        b.addActionListener(e -> action.run());
+        p.add(b);
+        p.add(Box.createVerticalStrut(4));
+    }
+
+    void open() {
+        rooms.removeAllItems();
+        for (String k : game.adminRoomKeys()) rooms.addItem(k + " — " + game.adminRoomName(k));
+        god.setSelected(game.adminGod());
+        status.setText(game.adminStatus());
+        pack();
+        place();
+        refresher.start();
+        setVisible(true);
+        toFront();
+    }
+
+    void close() {
+        refresher.stop();
+        setVisible(false);
+    }
+
+    // справа от окна игры; если не помещается на экран — внахлёст на его правый край
+    private void place() {
+        Window o = getOwner();
+        Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        int x = o.getX() + o.getWidth() + 8;
+        if (x + getWidth() > screen.x + screen.width) x = o.getX() + o.getWidth() - getWidth() - 20;
+        int y = Math.max(screen.y, Math.min(o.getY(), screen.y + screen.height - getHeight()));
+        setLocation(Math.max(screen.x, x), y);
+    }
+}
