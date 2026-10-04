@@ -63,6 +63,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // проверка вазы
     private int checkTimer;
+    private int checkTotal = CHECK_TIME;                  // длина текущей проверки (для полоски)
     private Vase checkVase;
 
     private String message = "";
@@ -87,6 +88,9 @@ public class GamePanel extends JPanel implements KeyListener {
     private final Sins sins = new Sins();                 // система грехов (Рай / Ад)
     private Sins.Ending ending = Sins.Ending.HEAVEN;
     private Cutscene cutscene;                           // вступительная катсцена (null — не идёт)
+    private EndingCutscene epilogue;                  // катсцена-эпилог после экрана Ад/Рай (null — не идёт)
+    private int victoryTimer;                         // сколько кадров уже висит экран Ад/Рай
+    private static final int EPILOGUE_DELAY = 375;    // через сколько кадров запустится эпилог (16 мс на кадр ≈ 6 секунд)
 
     private Inventory inventory = new Inventory();
     private Item equipped;
@@ -99,6 +103,12 @@ public class GamePanel extends JPanel implements KeyListener {
         setFocusable(true);
         setFocusTraversalKeysEnabled(false);
         addKeyListener(this);
+
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
+                SwingUtilities.invokeLater(this::requestFocusInWindow);
+            }
+        });
 
         addMouseListener(new MouseAdapter() {
             @Override
@@ -480,10 +490,7 @@ public class GamePanel extends JPanel implements KeyListener {
         if (loc >= 2) pit(b, 27, 27);
         switch (kind) {
             case 3, 4 -> { }                                        // комната-встреча: предметов нет, только сценка
-            case 0 -> {
-                if (loc == 1) { for (int c : new int[]{14, 17, 20, 23}) b.set(c, 9, 'V'); }   // музей: вазы стоят по одной
-                else b.rect(14, 9, 13 + (loc >= 4 ? 4 : 3), 9, 'V');
-            }
+            case 0 -> vaseLayout(b, loc);                           // много ваз: на полу и на полках
             case 1 -> {
                 char ch = loc % 2 == 1 && loc != 1 ? 'Z' : 'R';      // в первой локации — розы
                 if (loc == 1) {                                      // середину комнаты занимает семья Осмаров
@@ -535,8 +542,10 @@ public class GamePanel extends JPanel implements KeyListener {
             case 0 -> {
                 r.goal = Room.Goal.CANDLE;
                 r.goalLabel = "найди свечу";
-                r.subtitle = "Комната " + n + " из 4: найди свечу среди ваз";
-                hint = "Свеча в одной из ваз. E — проверить (безопасно), L — разбить (штраф!)";
+                r.checkTime = 60 + loc * 20;                        // чем глубже, тем дольше стоять над вазой
+                r.subtitle = "Комната " + n + " из 4: найди свечу среди " + r.vases.size() + " ваз";
+                hint = "Свеча в одной из " + r.vases.size() + " ваз. E — проверить (" + String.format("%.1f", r.checkTime / 60.0) + " с, стой смирно), L — разбить (штраф!)";
+                vaseGuards(r, loc);
             }
             case 1 -> {
                 r.goal = Room.Goal.COLLECT;
@@ -561,6 +570,24 @@ public class GamePanel extends JPanel implements KeyListener {
         else if (loc == 5) decorateGluttony(r, n);
         else if (loc == 6) decorateSloth(r, n);
         return r;
+    }
+
+
+    // Комната с вазами: пол + полки (платформы в ряду 8, на них вазы в ряду 7). Колонку 27 (яма) и ворота (30) не трогаем.
+    private void vaseLayout(MapBuilder b, int loc) {
+        int[] floor = loc == 1 ? new int[]{13, 15, 18, 20, 23, 25} : new int[]{12, 14, 16, 19, 21, 24, 26};
+        int[] shelf = loc == 1 ? new int[]{17, 24} : loc >= 4 ? new int[]{15, 18, 23, 25} : new int[]{15, 23};
+        for (int c : floor) b.set(c, 9, 'V');
+        for (int c : shelf) {
+            b.set(c, 8, '#');                                   // полка в 2 клетки над полом — достать прыжком
+            b.set(c, 7, 'V');
+        }
+    }
+
+    // Ловушки среди ваз: пока Эльза стоит над вазой, шипы могут выскочить — любой урон прерывает проверку.
+    private void vaseGuards(Room r, int loc) {
+        if (loc >= 2) hidden(r, 17, 20, 25);
+        if (loc >= 4) flame(r, 13, 40);
     }
 
     // В каждой локации одна из комнат 1-3 — «пустышка»: ни цели, ни ворот, только ловушки (прыжки, стрелы, огонь, шипы).
@@ -744,17 +771,45 @@ public class GamePanel extends JPanel implements KeyListener {
     private static final int SC_DOUBLE = 0, SC_TRIO = 1, SC_BRIDGE = 2, SC_HILL = 3, SC_TURRET = 4,
             SC_CEIL = 5, SC_SAW = 6, SC_RHYTHM = 7, SC_ROCKS = 8;
     private static final int[] SCENE_MIN_LEVEL = {1, 3, 2, 2, 1, 2, 3, 1, 1};
+    private static final int BASE_SCENES = 9;                  // обычные сцены 0..8 выбираются случайно
+    // фирменные сцены локаций (ставятся на дороге гарантированно, 2 раза): у каждого греха своя «изюминка»
+    private static final int SC_FIREWAVE = 9, SC_GOLDBRIDGE = 10, SC_TWINSAWS = 11, SC_THORNS = 12, SC_CROSSFIRE = 13;
+    // фирменная сцена по локациям 1..7 (Леность — течение, Гордыня — лучшее из всего)
+    private static final int[] SIGNATURE = {SC_FIREWAVE, SC_GOLDBRIDGE, SC_TWINSAWS, SC_THORNS, SC_CROSSFIRE, SC_BRIDGE, SC_FIREWAVE};
+    // любимые обычные сцены локации: они выпадают втрое чаще, поэтому у каждого спуска свой характер
+    private static final int[][] FAVORED = {
+            {SC_HILL, SC_RHYTHM},                // Гнев: огонь и шипы
+            {SC_BRIDGE, SC_DOUBLE},              // Алчность: мосты над пропастью
+            {SC_SAW, SC_ROCKS},                  // Зависть: пилы и камни
+            {SC_RHYTHM, SC_CEIL},                // Похоть: шипы и стрелы сверху
+            {SC_TURRET, SC_CEIL},                // Чревоугодие: стрелы со всех сторон
+            {SC_DOUBLE, SC_TRIO},                // Леность: прыжки против течения
+            {SC_SAW, SC_TURRET, SC_HILL},        // Гордыня: всего понемногу
+    };
 
     private void buildHardRoad(MapBuilder b, List<java.util.function.Consumer<Room>> tr, int from, int to, int level, Random rnd) {
-        int c = from, last = -1;
+        int c = from, last = -1, idx = 0;
+        int sig = SIGNATURE[Math.min(level, SIGNATURE.length) - 1];
+        int[] fav = FAVORED[Math.min(level, FAVORED.length) - 1];
         while (true) {
-            List<Integer> pool = new ArrayList<>();
-            for (int k = 0; k < SCENE_MIN_LEVEL.length; k++) if (k != last && level >= SCENE_MIN_LEVEL[k]) pool.add(k);
-            int kind = pool.get(rnd.nextInt(pool.size()));
+            int kind;
+            if (idx == 1 || idx == 4 || idx == 8) {                           // фирменная сцена локации
+                kind = sig;
+            } else {
+                List<Integer> pool = new ArrayList<>();
+                for (int k = 0; k < BASE_SCENES; k++) {
+                    if (k == last || level < SCENE_MIN_LEVEL[k]) continue;
+                    int weight = 1;
+                    for (int f : fav) if (f == k) weight = 3;
+                    for (int w = 0; w < weight; w++) pool.add(k);
+                }
+                kind = pool.get(rnd.nextInt(pool.size()));
+            }
             int width = sceneWidth(kind, level, rnd);
             if (c + width > to) break;
             buildScene(kind, c, level, b, tr, rnd);
             last = kind;
+            idx++;
             c += width + Math.max(3, 5 - level / 3) + rnd.nextInt(2);        // свободный участок между сценами
         }
     }
@@ -769,6 +824,11 @@ public class GamePanel extends JPanel implements KeyListener {
             case SC_CEIL -> 6;
             case SC_SAW -> 9;
             case SC_RHYTHM -> level >= 4 ? 10 : 7;
+            case SC_FIREWAVE -> 9;
+            case SC_GOLDBRIDGE -> 7;
+            case SC_TWINSAWS -> 13;
+            case SC_THORNS -> 13;
+            case SC_CROSSFIRE -> 11;
             default -> 7;                                                      // камни
         };
     }
@@ -821,12 +881,48 @@ public class GamePanel extends JPanel implements KeyListener {
                 tr.add(r -> r.traps.add(Trap.hidden(c + 3, 9)));
                 if (level >= 4) tr.add(r -> r.traps.add(Trap.hidden(c + 9, 9)));
             }
+            case SC_FIREWAVE -> {                     // «волна огня»: три струи по очереди, жди паузу у каждой
+                tr.add(r -> r.traps.add(Trap.flame(c + 1, 9, 0)));
+                tr.add(r -> r.traps.add(Trap.flame(c + 4, 9, 70)));
+                tr.add(r -> r.traps.add(Trap.flame(c + 7, 9, 140)));
+            }
+            case SC_GOLDBRIDGE -> {                   // длинный хрупкий мост, а над ним огненная струя
+                pit(b, c, c + 6);
+                for (int k = 0; k < 7; k++) { int col = c + k; tr.add(r -> r.traps.add(Trap.crumble(col, 10))); }
+                tr.add(r -> r.traps.add(Trap.flame(c + 2, 9, ph)));
+            }
+            case SC_TWINSAWS -> {                     // две пилы подряд
+                tr.add(r -> r.traps.add(Trap.saw(c, c + 4, 9)));
+                tr.add(r -> r.traps.add(Trap.saw(c + 8, c + 12, 9)));
+            }
+            case SC_THORNS -> {                       // терновник: шип, скрытые шипы, шип, скрытые шипы, шип
+                b.set(c, 9, '^');
+                b.set(c + 6, 9, '^');
+                b.set(c + 12, 9, '^');
+                tr.add(r -> r.traps.add(Trap.hidden(c + 3, 9)));
+                tr.add(r -> r.traps.add(Trap.hidden(c + 9, 9)));
+            }
+            case SC_CROSSFIRE -> {                    // два стрелострела подряд: перепрыгни стрелу и залезь на блок
+                b.set(c + 2, 9, '#');
+                b.set(c + 8, 9, '#');
+                tr.add(r -> r.traps.add(Trap.arrow(c + 2, 9, -1, 0, 5, ph)));
+                tr.add(r -> r.traps.add(Trap.arrow(c + 8, 9, -1, 0, 5, (ph + 85) % 170)));
+            }
             default -> {                              // два камня в потолке: подойди — задрожит, отойди — упадёт
                 tr.add(r -> r.traps.add(Trap.rock(c + 1, 1)));
                 tr.add(r -> r.traps.add(Trap.rock(c + 5, 1)));
             }
         }
     }
+
+    private static final String[] ROAD_SUB = {
+            "Спуск Гнева: волны огня и шипы — не торопись",
+            "Спуск Алчности: золотой мост над пропастью",
+            "Спуск Зависти: пилы и камни, зеркало твоих страхов",
+            "Спуск Похоти: терновник — каждый шаг колет",
+            "Спуск Чревоугодия: стрелы летят со всех сторон",
+            "Спуск Лености: течение сна тянет назад — не останавливайся",
+            "Последний спуск — к самому дну: всё, что ты прошла"};
 
     // Дорога спуска между локациями: длинная дорога ловушек вниз. Назад дороги нет.
     private Room road(int loc) {
@@ -842,7 +938,8 @@ public class GamePanel extends JPanel implements KeyListener {
         r.theme = SIN_THEMES[loc - 1];
         r.title = "СПУСК";
         r.look = Room.Look.VOID;                               // спуск между локациями — почти чёрный
-        r.subtitle = loc < LOCS ? "Дорога ловушек вниз — к локации " + (loc + 1) : "Последний спуск — к самому дну";
+        r.subtitle = ROAD_SUB[loc - 1];
+        if (loc == 6) r.wind = 1;                              // спуск Лености: течение сна тянет назад
         r.goal = Room.Goal.NONE;
         r.exitChar = '2';
         r.exitLocked = false;
@@ -1208,6 +1305,8 @@ public class GamePanel extends JPanel implements KeyListener {
         mashProp = null;
         mashDown.clear();
         won = false;
+        victoryTimer = 0;
+        epilogue = null;
         sins.reset();
         respawnCol = 2;
         respawnRow = 5;
@@ -1235,6 +1334,8 @@ public class GamePanel extends JPanel implements KeyListener {
         adminHide();
         godMode = false;
         cutscene = null;
+        epilogue = null;
+        victoryTimer = 0;
         dialog = null;
         dialogProp = null;
         mashProp = null;
@@ -1242,7 +1343,26 @@ public class GamePanel extends JPanel implements KeyListener {
         up = down = left = right = jump = false;
         invOpen = false;
     }
+    // Пауза (меню по ESC): мир замирает, но ничего не сбрасывается — потом можно продолжить с того же места
+    public void pause() {
+        timer.stop();
+        adminHide();
+        up = down = left = right = jump = false;
+        mashDown.clear();
+    }
 
+    public void resume() {
+        timer.start();
+        requestFocusInWindow();
+    }
+
+    // Где остановился игрок — подпись на кнопке «ПРОДОЛЖИТЬ» в главном меню
+    public String progressText() {
+        if (current == null) return "";
+        String k = current.key == null ? "" : current.key;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d").matcher(k);
+        return (m.find() ? "Локация " + m.group() + " · " : "") + current.name;
+    }
     private void enterRoom(Room r) {
         current = r;
         titleTimer = r.title != null ? 170 : 0;
@@ -1254,6 +1374,18 @@ public class GamePanel extends JPanel implements KeyListener {
         if (cutscene != null) {                                  // идёт катсцена — мир стоит
             cutscene.update();
             if (cutscene.finished()) cutscene = null;
+            return;
+        }
+        if (epilogue != null) {                                  // идёт эпилог — мир стоит
+            epilogue.update();
+            if (epilogue.finished()) {
+                epilogue = null;
+                window.showMenu();
+            }
+            return;
+        }
+        if (won && ++victoryTimer >= EPILOGUE_DELAY) {           // экран Ад/Рай показан ~6 секунд — запускаем эпилог
+            epilogue = new EndingCutscene(ending);
             return;
         }
         if (messageTimer > 0) messageTimer--;
@@ -1537,7 +1669,8 @@ public class GamePanel extends JPanel implements KeyListener {
         Vase v = nearVase();
         if (v != null) {                                      // безопасная проверка вазы
             checkVase = v;
-            checkTimer = CHECK_TIME;
+            checkTotal = Math.max(1, current.checkTime);
+            checkTimer = checkTotal;
         }
     }
 
@@ -1659,6 +1792,10 @@ public class GamePanel extends JPanel implements KeyListener {
             cutscene.draw((Graphics2D) g);
             return;
         }
+        if (epilogue != null) {
+            epilogue.draw((Graphics2D) g);
+            return;
+        }
         int cx = (int) Math.round(camX);
         int cy = (int) Math.round(camY);
 
@@ -1680,7 +1817,7 @@ public class GamePanel extends JPanel implements KeyListener {
             world.setColor(new Color(0, 0, 0, 170));
             world.fillRect(bx - 1, by - 1, 46, 8);
             world.setColor(new Color(120, 230, 140));
-            world.fillRect(bx, by, (int) (44 * (1 - checkTimer / (double) CHECK_TIME)), 6);
+            world.fillRect(bx, by, (int) (44 * (1 - checkTimer / (double) checkTotal)), 6);
         }
         world.dispose();
 
@@ -1793,7 +1930,7 @@ public class GamePanel extends JPanel implements KeyListener {
                 + "   (Рай — от " + Sins.HEAVEN_LIMIT + " добрых, Ад — от " + Sins.HELL_LIMIT + " плохих)", 340);
         g.setFont(new Font("Monospaced", Font.PLAIN, 16));
         g.setColor(heaven ? new Color(40, 60, 110) : new Color(230, 200, 190));
-        drawCentered(g, "Enter / ESC — в меню", 380);
+        drawCentered(g, "Enter — дальше (эпилог начнётся сам)", 380);
     }
 
     private void drawHeart(Graphics2D g, int x, int y, boolean full) {
@@ -1941,7 +2078,7 @@ public class GamePanel extends JPanel implements KeyListener {
             } else if (nearCat()) {
                 drawBanner(g, "E — спасти кота      L — ударить мечом", Room.VIEW_H - 24, new Color(240, 200, 60));
             } else if (checkTimer == 0 && nearVase() != null) {
-                drawBanner(g, "E — проверить (безопасно)      L — разбить (штраф!)", Room.VIEW_H - 24, new Color(240, 200, 60));
+                drawBanner(g, "E — проверить (" + String.format("%.1f", current.checkTime / 60.0) + " с, не двигайся)      L — разбить (штраф!)", Room.VIEW_H - 24, new Color(240, 200, 60));
             }
             String lockHint = lockedDoorHint();
             if (lockHint != null) drawBanner(g, lockHint, Room.VIEW_H - 24, new Color(200, 80, 80));
@@ -2058,8 +2195,21 @@ public class GamePanel extends JPanel implements KeyListener {
             toggleAdmin();
             return true;                                      // нажатие «съедено», дальше в игру не идёт
         }
+        // ESC: если фокус ушёл с игровой панели, обычный KeyListener молчит — обрабатываем здесь
+        if (ev.getID() == KeyEvent.KEY_PRESSED && ev.getKeyCode() == KeyEvent.VK_ESCAPE
+                && isShowing() && !isFocusOwner() && windowActive()) {
+            keyPressed(ev);
+            requestFocusInWindow();                           // и возвращаем фокус игре
+            return true;
+        }
         return false;
     };
+
+    // активно ли окно игры (отдельным методом, потому что лямбда в поле выше не может читать final-поле window)
+    private boolean windowActive() {
+        Window w = SwingUtilities.getWindowAncestor(this);
+        return w != null && w.isActive();
+    }
 
     @Override public void addNotify() {
         super.addNotify();
@@ -2100,6 +2250,8 @@ public class GamePanel extends JPanel implements KeyListener {
     // сбрасывает всё «временное» состояние перед скачком в другое место
     private void adminReset() {
         cutscene = null;
+        epilogue = null;
+        victoryTimer = 0;
         dialog = null;
         dialogProp = null;
         mashProp = null;
@@ -2276,8 +2428,14 @@ public class GamePanel extends JPanel implements KeyListener {
             return;
         }
 
-        if (won) {
-            if (k == KeyEvent.VK_ENTER || k == KeyEvent.VK_ESCAPE) window.showMenu();
+        if (epilogue != null) {
+            if (k == KeyEvent.VK_ESCAPE) epilogue.skip();
+            else if (k == KeyEvent.VK_SPACE || k == KeyEvent.VK_ENTER || isKey(e, KeyEvent.VK_E, 'у')) epilogue.advance();
+            return;
+        }
+
+        if (won) {                                                       // Enter / ESC на экране Ад/Рай — сразу к эпилогу
+            if (k == KeyEvent.VK_ENTER || k == KeyEvent.VK_ESCAPE) victoryTimer = EPILOGUE_DELAY;
             return;
         }
 
@@ -2318,7 +2476,7 @@ public class GamePanel extends JPanel implements KeyListener {
             case KeyEvent.VK_D, KeyEvent.VK_RIGHT -> right = true;
             case KeyEvent.VK_SPACE -> jump = true;                       // прыжок — ПРОБЕЛ
             case KeyEvent.VK_I, KeyEvent.VK_TAB -> openInventory();
-            case KeyEvent.VK_ESCAPE -> window.showMenu();
+            case KeyEvent.VK_ESCAPE -> SwingUtilities.invokeLater(window::showPause);   // после обработки события, иначе ESC сразу «нажмёт» кнопку меню паузы
         }
     }
 

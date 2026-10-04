@@ -54,6 +54,7 @@ public class Room {
     public enum Look { CLASSIC, GALLERY, VOID }
     public Look look = Look.GALLERY;
     public String title, subtitle;                   // заставка при входе
+    public int checkTime = 45;                       // сколько кадров длится безопасная проверка вазы (в каждой комнате своё)
     public int wind;                                 // >0 — течение тянет игрока влево (Лень)
     public int gateCol = -1;                         // колонка ворот 'G' (-1 = нет)
 
@@ -498,13 +499,15 @@ public class Room {
             g.setColor(new Color(24, 34, 52));
             g.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
         }
-        g.setColor(new Color(196, 204, 220));
-        for (int i = 0; i < 2; i++) {
-            for (int j = 0; j < 2; j++) {
-                int sx = x + 6 + i * 21, sy = y + 6 + j * 21;
-                g.fillPolygon(new int[]{sx, sx + 8, sx + 16}, new int[]{sy + 16, sy, sy + 16}, 3);
-            }
-        }
+        // один большой шип на всю клетку: левая грань светлая, правая тёмная
+        int left = x + 4, right = x + TILE - 4, mid = x + TILE / 2;
+        int top = y + 3, base = y + TILE - 4;
+        g.setColor(new Color(204, 212, 228));
+        g.fillPolygon(new int[]{left, mid, mid}, new int[]{base, top, base}, 3);
+        g.setColor(new Color(142, 151, 172));
+        g.fillPolygon(new int[]{mid, right, mid}, new int[]{base, base, top}, 3);
+        g.setColor(new Color(240, 244, 252));                  // блик вдоль левого ребра
+        g.fillPolygon(new int[]{mid - 1, mid - 1, mid - 7}, new int[]{top + 4, top + 22, top + 22}, 3);
     }
 
     // дверь: если у неё есть цвет (tint) — рисуем рамку этого цвета со свечением

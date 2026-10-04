@@ -16,12 +16,15 @@ class GameWindow extends JFrame {
     private final CardLayout cards = new CardLayout();
     private final JPanel root = new JPanel(cards);
     private final GamePanel gamePanel = new GamePanel(this);
+    private final MainMenuPanel mainMenu = new MainMenuPanel(this);   // главное меню (вход в игру)
+    private final MenuPanel pauseMenu = new MenuPanel(this);          // меню паузы (ESC во время игры)
 
     public GameWindow() {
         setTitle("Моя игра");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
-        root.add(new MenuPanel(this), "MENU");
+        root.add(mainMenu, "MAIN");
+        root.add(pauseMenu, "PAUSE");
         root.add(gamePanel, "GAME");
         add(root);
 
@@ -32,12 +35,36 @@ class GameWindow extends JFrame {
         showMenu();
     }
 
+    // Главное меню без сохранения: при запуске и после финала игры (GamePanel вызывает именно этот метод).
     public void showMenu() {
         gamePanel.stop();
-        cards.show(root, "MENU");
+        mainMenu.setProgress(null);
+        cards.show(root, "MAIN");
     }
 
-    public void startGame() {
+    // ESC во время игры: пауза, мир замирает, ничего не сбрасывается
+    public void showPause() {
+        gamePanel.pause();
+        cards.show(root, "PAUSE");
+    }
+
+    // в меню паузы нажали ИГРАТЬ (или ещё раз ESC) / в главном меню нажали ПРОДОЛЖИТЬ
+    public void resumeGame() { continueGame(); }
+
+    public void continueGame() {
+        cards.show(root, "GAME");
+        gamePanel.resume();
+    }
+
+    // в меню паузы нажали ВЫХОД: идём в главное меню, но игра запоминается — там появляется кнопка ПРОДОЛЖИТЬ
+    public void exitToMainMenu() {
+        gamePanel.pause();
+        mainMenu.setProgress(gamePanel.progressText());
+        cards.show(root, "MAIN");
+    }
+
+    // в главном меню нажали ИГРАТЬ: новая игра с нуля
+    public void startNewGame() {
         cards.show(root, "GAME");
         gamePanel.start();
         gamePanel.requestFocusInWindow();
