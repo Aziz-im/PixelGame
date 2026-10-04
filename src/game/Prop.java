@@ -10,7 +10,8 @@ import java.awt.geom.AffineTransform;
 public class Prop {
     public enum Kind {
         PAINTING, WHIPS, PILLORY, TOYS, PLAQUE, WORKER, DESK, CABINET, CLOTHES,
-        CHRIS, SEBASTIAN, BUFFET, CANTEEN, TRASH, BATH, RAG, DOLL, DRESS, FAMILY, BED
+        CHRIS, SEBASTIAN, BUFFET, CANTEEN, TRASH, BATH, RAG, DOLL, DRESS, FAMILY, BED,
+        KID_BED, TOY_TABLE, DOC, POUCH       // Алчность: загадки приюта (игрушки детям, поддельная печать)
     }
 
     private static final int T = Room.TILE;
@@ -25,6 +26,15 @@ public class Prop {
     public String endText, winText, loseText;
     public String effect;                  // эффект после сценки: "SICK", "SLEEPY"
     public boolean done;
+    // --- загадки (Алчность) ---
+    public String action;                  // null — просто декорация; иначе E запускает действие (TOY_TAKE, KID, DOC)
+    public int want;                       // KID: какую игрушку хочет ребёнок (0..2)
+    public boolean forged;                 // DOC: печать подделана
+    public boolean solved;                 // KID — получил игрушку, DOC — порван
+    public boolean hidden;                 // не рисуется (мешочек до решения загадки)
+    public int toyMask = 7;                // TOY_TABLE: какие игрушки ещё лежат на столе (биты 0..2)
+    public String label = "";              // имя ребёнка
+    public static final String[] TOY_NAMES = {"кубики", "мишку", "мячик"};
     private Cat bedCat;                    // кошка на кровати (для Kind.BED)
     private int age;                       // кадров после завершения (для исчезновения)
 
@@ -52,6 +62,13 @@ public class Prop {
         return p;
     }
 
+    // предмет, с которым можно взаимодействовать клавишей E (загадки)
+    public static Prop action(Kind kind, int col, int row, String action) {
+        Prop p = new Prop(kind, col, row);
+        p.action = action;
+        return p;
+    }
+
     public static Prop plaque(int col, int row, String text) {
         Prop p = new Prop(Kind.PLAQUE, col, row);
         p.text = text;
@@ -68,6 +85,7 @@ public class Prop {
 
     // ================= ОТРИСОВКА =================
     public void draw(Graphics2D g, int tick) {
+        if (hidden) return;
         if (done) age++;
         int x = col * T, y = row * T;
 
@@ -78,6 +96,7 @@ public class Prop {
         Composite old = g.getComposite();
         if (a < 1f) g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, a));
 
+        final int fx = x, fy = y;
         switch (kind) {
             case PAINTING -> drawPainting(g, x, y);
             case WHIPS -> drawWhips(g, x, y);
@@ -112,6 +131,10 @@ public class Prop {
             case DRESS -> drawDress(g, x, y, tick);
             case FAMILY -> drawFamily(g, x, y, tick);
             case BED -> drawBedWithCat(g, x, y, tick);
+            case KID_BED -> big(g, x, y, 1.3, () -> drawKidBed(g, fx, fy));
+            case TOY_TABLE -> big(g, x, y, 1.5, () -> drawToyTable(g, fx, fy));
+            case DOC -> big(g, x, y, 1.9, () -> drawDoc(g, fx, fy));
+            case POUCH -> drawPouch(g, x, y, tick);
         }
         g.setComposite(old);
     }
@@ -206,7 +229,11 @@ public class Prop {
     // ---------- приют ----------
     private void drawToys(Graphics2D g, int x, int y) {
         shadow(g, x, y, 40);
-        int v = col % 3;
+        toyType(g, x, y, col % 3);
+    }
+
+    // игрушка по типу: 0 — кубики, 1 — мишка, 2 — мячик и юла
+    private static void toyType(Graphics2D g, int x, int y, int v) {
         if (v == 0) {                                              // кубики
             g.setColor(new Color(210, 70, 70));
             g.fillRect(x + 6, y + 30, 16, 16);
@@ -239,6 +266,15 @@ public class Prop {
             g.setColor(new Color(240, 200, 60));
             g.fillRect(x + 34, y + 24, 2, 7);
         }
+    }
+
+    // иконка игрушки с масштабом (на столе, на рисунке, в руках)
+    public static void toyIcon(Graphics2D g, int x, int y, int type, double sc) {
+        AffineTransform old = g.getTransform();
+        g.translate(x, y);
+        g.scale(sc, sc);
+        toyType(g, 0, 0, type);
+        g.setTransform(old);
     }
 
     private void drawPlaque(Graphics2D g, int x, int y) {
@@ -460,6 +496,136 @@ public class Prop {
         person(g, x + 30, y + 46, new Color(110, 70, 44), new Color(160, 80, 100), new Color(110, 60, 70), true, 1.0, false);
         person(g, x + 62, y + 46, new Color(245, 202, 3), new Color(240, 200, 220), new Color(200, 160, 180), true, 0.7, false);
         g.setComposite(old);
+    }
+
+    // ---------- Алчность: загадки приюта ----------
+    // рисует предмет крупнее (от середины низа клетки), чтобы мелкие детали — печати, рисунки — были видны
+    private static void big(Graphics2D g, int x, int y, double sc, Runnable draw) {
+        AffineTransform old = g.getTransform();
+        g.translate(x + T / 2.0, y + T);
+        g.scale(sc, sc);
+        g.translate(-(x + T / 2.0), -(y + T));
+        draw.run();
+        g.setTransform(old);
+    }
+
+    // кровать ребёнка: над ней висит его рисунок — именно эту игрушку он хочет
+    private void drawKidBed(Graphics2D g, int x, int y) {
+        shadow(g, x, y, 58);
+        Color[] blankets = {new Color(70, 110, 170), new Color(170, 80, 110), new Color(90, 150, 90)};
+        Color bl = blankets[Math.floorMod(want, 3)];
+        g.setColor(new Color(96, 62, 34));                         // изголовье и ножки
+        g.fillRect(x - 4, y + 20, 5, 28);
+        g.fillRect(x + 47, y + 30, 5, 18);
+        g.setColor(new Color(130, 86, 46));                        // рама
+        g.fillRect(x - 4, y + 32, 56, 6);
+        g.setColor(new Color(225, 225, 215));                      // подушка
+        g.fillRect(x, y + 25, 14, 8);
+        g.setColor(solved ? bl : Theme.mix(bl, Color.GRAY, 0.45)); // одеяло
+        g.fillRect(x + 12, y + 27, 36, 7);
+        if (solved) {                                              // ребёнок улыбается, игрушка рядом
+            g.setColor(SKIN);
+            g.fillOval(x + 1, y + 15, 12, 12);
+            g.setColor(new Color(60, 40, 30));
+            g.fillRect(x + 4, y + 19, 2, 2);
+            g.fillRect(x + 9, y + 19, 2, 2);
+            g.fillRect(x + 5, y + 23, 5, 1);
+            toyIcon(g, x + 24, y + 6, want, 0.55);
+        }
+        // рисунок ребёнка на стене + имя
+        int px = x + 4, py = y - 66;
+        g.setColor(new Color(0, 0, 0, 60));
+        g.fillRect(px + 3, py + 3, 42, 38);
+        g.setColor(new Color(240, 232, 200));
+        g.fillRect(px, py, 42, 38);
+        g.setColor(new Color(190, 170, 120));
+        g.drawRect(px, py, 41, 37);
+        toyIcon(g, px + 4, py + 2, want, 0.72);
+        g.setColor(new Color(200, 60, 60));                        // кнопка
+        g.fillRect(px + 19, py - 2, 4, 4);
+        Font old = g.getFont();
+        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setColor(Color.BLACK);
+        g.drawString(label, px + 1, py - 5);
+        g.setColor(new Color(250, 236, 190));
+        g.drawString(label, px, py - 6);
+        g.setFont(old);
+    }
+
+    // стол с игрушками и карточками с именами детей
+    private void drawToyTable(Graphics2D g, int x, int y) {
+        g.setColor(new Color(0, 0, 0, 60));
+        g.fillOval(x - 8, y + 42, 64, 6);
+        g.setColor(new Color(96, 62, 34));
+        g.fillRect(x - 2, y + 30, 5, 18);
+        g.fillRect(x + 45, y + 30, 5, 18);
+        g.setColor(new Color(130, 86, 46));
+        g.fillRect(x - 6, y + 26, 60, 6);
+        g.setColor(new Color(170, 120, 70));
+        g.fillRect(x - 6, y + 26, 60, 2);
+        for (int t = 0; t < 3; t++) if ((toyMask >> t & 1) != 0) toyIcon(g, x - 4 + t * 19, y + 5, t, 0.45);
+        String[] names = {"ТИМ", "МИЛА", "ЛЕВ"};                   // карточки с именами на крае стола
+        Font old = g.getFont();
+        g.setFont(new Font("Monospaced", Font.BOLD, 8));
+        for (int i = 0; i < 3; i++) {
+            g.setColor(new Color(240, 232, 200));
+            g.fillRect(x - 4 + i * 19, y + 34, 18, 10);
+            g.setColor(new Color(60, 40, 30));
+            g.drawString(names[i], x - 3 + i * 19, y + 42);
+        }
+        g.setFont(old);
+    }
+
+    // документ с печатью и монетой на маленьком столе; у подделки лучей меньше, чем у настоящей (7)
+    private void drawDoc(Graphics2D g, int x, int y) {
+        g.setColor(new Color(0, 0, 0, 60));
+        g.fillOval(x - 4, y + 42, 56, 6);
+        g.setColor(new Color(96, 62, 34));
+        g.fillRect(x - 2, y + 30, 5, 18);
+        g.fillRect(x + 45, y + 30, 5, 18);
+        g.setColor(new Color(130, 86, 46));
+        g.fillRect(x - 4, y + 28, 56, 5);
+        g.setColor(new Color(170, 120, 70));
+        g.fillRect(x - 4, y + 28, 56, 2);
+        if (solved && forged) {                                    // порванная бумага: две половинки
+            g.setColor(new Color(236, 232, 220));
+            g.fillPolygon(new int[]{x + 2, x + 20, x + 17, x + 2}, new int[]{y + 16, y + 20, y + 28, y + 28}, 4);
+            g.fillPolygon(new int[]{x + 24, x + 42, x + 42, x + 21}, new int[]{y + 21, y + 14, y + 28, y + 28}, 4);
+            return;
+        }
+        g.setColor(new Color(236, 232, 220));                      // бумага
+        g.fillRect(x + 2, y + 8, 30, 20);
+        g.setColor(new Color(150, 146, 136));
+        for (int i = 0; i < 3; i++) g.fillRect(x + 5, y + 11 + i * 4, 16, 1);
+        // печать
+        int cx = x + 25, cy = y + 20, rays = forged ? 5 : 7;
+        g.setColor(forged ? new Color(214, 120, 60) : new Color(170, 30, 40));
+        for (int i = 0; i < rays; i++) {
+            double a = -Math.PI / 2 + i * 2 * Math.PI / rays;
+            g.fillRect(cx + (int) Math.round(Math.cos(a) * 8) - 1, cy + (int) Math.round(Math.sin(a) * 8) - 1, 3, 3);
+        }
+        g.fillOval(cx - 5, cy - 5, 10, 10);
+        g.setColor(forged ? new Color(150, 80, 40) : new Color(110, 14, 24));
+        g.fillOval(cx - 2, cy - 2, 4, 4);
+        g.setColor(new Color(240, 200, 60));                       // монета
+        g.fillOval(x + 36, y + 22, 9, 6);
+        g.setColor(new Color(172, 124, 28));
+        g.drawOval(x + 36, y + 22, 8, 5);
+    }
+
+    private void drawPouch(Graphics2D g, int x, int y, int tick) {
+        shadow(g, x, y, 30);
+        g.setColor(Theme.alpha(new Color(255, 215, 90), 40 + (int) (Math.sin(tick * 0.08) * 14)));
+        g.fillOval(x + 2, y + 14, 44, 36);
+        g.setColor(new Color(120, 82, 46));
+        g.fillOval(x + 10, y + 24, 28, 22);
+        g.setColor(new Color(90, 60, 32));
+        g.fillRect(x + 18, y + 20, 12, 6);
+        g.setColor(new Color(240, 200, 60));
+        g.fillRect(x + 18, y + 25, 12, 2);
+        g.fillOval(x + 30, y + 40, 8, 5);
+        g.setColor(new Color(250, 236, 140));
+        g.fillRect(x + 20, y + 33, 3, 3);
     }
 }
 
