@@ -80,6 +80,12 @@ public class GamePanel extends JPanel implements KeyListener {
     private String blackText = "…ах…";                  // что написано на тёмном экране (стон / «Zzz…»)
     private int distortTimer;                             // Лень: экран «плывёт» (Эльзе плохо в ванне)
     private double sleepDark;                             // Лень, комната 2: чем дольше Эльза не ложится, тем темнее экран (0..1)
+    // Гордыня
+    private double prideDark, prideTarget;                // комната 1: чем больше верных платьев, тем темнее (0..1)
+    private Prop jigProp;                                 // комната 2: открыт пазл с картиной семьи
+    private final int[] jig = new int[6];                 // jig[слот] = номер куска, который лежит в этом слоте
+    private boolean jigReady;                             // куски уже перемешаны
+    private int jigCur, jigSel = -1, jigWin;              // курсор, выбранный кусок, кадры показа собранной картины
     private boolean sleepThought;                         // мысль «если усну…» уже прозвучала
     private int blackTimer;                               // тёмный экран на секунду (провал «вырвись» у Криса): мир стоит, слышен стон
     private boolean slowPermanent;                        // после убийства кота
@@ -205,7 +211,7 @@ public class GamePanel extends JPanel implements KeyListener {
         // ---------- 7 ЛОКАЦИЙ: коридор + комнаты 1-3 + дорога спуска (4-я комната — грех, ниже) ----------
         for (int loc = 1; loc <= LOCS; loc++) {
             buildHall(loc);
-            if (loc != LOCS) for (int n = 1; n < roomsIn(loc); n++) add(trialKey(loc, n), trial(loc, n));   // Гордыня — одна большая комната
+            for (int n = 1; n < roomsIn(loc); n++) add(trialKey(loc, n), trial(loc, n));
             add(roadKey(loc), road(loc));
         }
 
@@ -387,48 +393,33 @@ public class GamePanel extends JPanel implements KeyListener {
         flame(r6, 56, 90);
         add("s6", r6);
 
-        // ---------- 7. ГОРДЫНЯ (синий + золото): одна большая комната — галерея прошлой жизни и псевдо-джинн ----------
-        MapBuilder b7 = MapBuilder.side(100);
-        gate(b7, 84);
-        b7.set(95, 9, '^');
-        Room r7 = sin(7, b7, "Джинн обещает вернуть прежнюю жизнь. Согласиться или отказаться?",
-                new Decision(Decision.Kind.GENIE, 77, 9,
-                        new Decision.Option("Да", false, "Эльза сказала «да». Гордыня потянула назад, но джинн был лишь миражом."),
-                        new Decision.Option("Нет", true, "Эльза сказала «нет». Мираж растаял, гордыня склонилась.")),
-                "Джинн. Он обещает вернуть всё, что ты потеряла");
-        r7.props.add(Prop.plaque(10, 3, "ГАЛЕРЕЯ ПРОШЛОГО"));
-        for (int c : new int[]{6, 9, 15, 18, 21}) r7.props.add(new Prop(Prop.Kind.DRESS, c, 9));
-        r7.props.add(Prop.talk(Prop.Kind.DRESS, 12, 9, null,
-                "Эльза|Мои старые платья... Шёлк, кружева, бархат.",
-                "Эльза|Когда-то я носила их и чувствовала себя особенной."));
-        r7.props.add(Prop.talk(Prop.Kind.FAMILY, 28, 9, null,
-                "Эльза|Мама... Папа... Я помню этот день.",
-                "Эльза|Мы сидели за одним столом и смеялись. Я была их гордостью.",
-                "Эльза|А потом всё исчезло."));
-        for (int c : new int[]{34, 38, 46, 50}) r7.props.add(new Prop(Prop.Kind.PAINTING, c, 6));
-        r7.props.add(Prop.plaque(42, 3, "ПРЕЖНЯЯ ЖИЗНЬ"));
-        r7.props.add(Prop.talk(Prop.Kind.PAINTING, 42, 6, null,
-                "Эльза|Наш дом, наш сад, наши слуги... Мне кланялись.",
-                "Эльза|Я гордилась всем этим. Слишком гордилась."));
-        for (int c : new int[]{55, 58, 64, 67}) r7.props.add(new Prop(Prop.Kind.DRESS, c, 9));
-        r7.props.add(Prop.talk(Prop.Kind.DRESS, 61, 9, null,
-                "Эльза|Бал... Я танцевала до рассвета, и все смотрели только на меня.",
-                "Эльза|Как же я скучаю по этой жизни."));
-        r7.props.add(Prop.talk(Prop.Kind.PLAQUE, 71, 9, null,
-                "Джинн|Эльза... Я вижу твоё сердце.",
-                "Джинн|Хочешь, я верну тебе всё? Платья, семью, дом, твоё имя?",
-                "Эльза|Ты правда можешь это сделать?",
-                "Джинн|Могу. Скажи только «да» или «нет»."));
-        hidden(r7, 88, 92);
-        flame(r7, 90, 60);
+        // ---------- 7. ГОРДЫНЯ (синий + золото): комнаты 1 — платья, 2 — семейный зал (пазл), 3 — пустой зал и псевдо-джинн ----------
+        MapBuilder b7 = MapBuilder.side(66);
+        gate(b7, 40);
+        b7.set(61, 9, '^');
+        Room r7 = sin(7, b7, "Комната 3 из 3: пустой зал. Джинн просит выбрать — вернуть всё или обрести покой",
+                new Decision(Decision.Kind.GENIE, 28, 9,
+                        new Decision.Option("Вернуть всё, что у меня было", false, "Эльза захотела вернуть прежнюю жизнь. Гордыня потянула назад, но джинн был лишь миражом."),
+                        new Decision.Option("Попасть в рай и закончить страдания", true, "Эльза выбрала покой. Мираж растаял, гордыня склонилась.")),
+                "Джинн. Он предлагает выбор: вернуть всё, что у тебя было, или попасть в рай");
+        r7.props.add(Prop.plaque(22, 3, "ПУСТОЙ ЗАЛ"));
+        r7.props.add(Prop.talk(Prop.Kind.PLAQUE, 20, 9, null,
+                "Огромная пустая комната. Ни мебели, ни окон — только эхо.",
+                "Перед Эльзой появляется фигура, похожая на джинна.",
+                "Джинн|ты столько всего сделала, но…",
+                "Джинн|выбери, чего ты хочешь больше:",
+                "Джинн|попасть в рай и закончить страдания",
+                "Джинн|или вернуть всё, что у тебя было."));
+        hidden(r7, 47, 56);
+        flame(r7, 51, 60);
         add("s7", r7);
     }
 
     // ====== КЛЮЧИ КОМНАТ ======
     private static String hallKey(int loc)         { return "h" + loc; }
     private static String roadKey(int loc)         { return "road" + loc; }
-    // сколько комнат в локации: у Алчности три (приют, работница, кабинет), у Зависти три (две девочки, праздничный стол, Анна), у Похоти три (одежда, Крис, Себастьян), у Чревоугодия три (фуршет, столовая слуг, мусорная), у остальных четыре; последняя комната — грех
-    private static int roomsIn(int loc) { return loc == 2 || loc == 3 || loc == 4 || loc == 5 || loc == 6 ? 3 : 4; }
+    // сколько комнат в локации: у Алчности три (приют, работница, кабинет), у Зависти три (две девочки, праздничный стол, Анна), у Похоти три (одежда, Крис, Себастьян), у Чревоугодия три (фуршет, столовая слуг, мусорная), у Гордыни три (платья, семейный зал, джинн), только у Гнева четыре; последняя комната — грех
+    private static int roomsIn(int loc) { return loc == 1 ? 4 : 3; }
     private static String trialKey(int loc, int n) { return n == roomsIn(loc) ? "s" + loc : "r" + loc + "_" + n; }   // последняя комната = грех s1..s7
     private static boolean isHall(Room r)          { return r != null && r.key != null && r.key.matches("h[1-7]"); }
     private static boolean isGluttonyRoom(Room r)  { return r != null && r.key != null && r.key.matches("r5_[1-2]|s5"); }
@@ -451,7 +442,7 @@ public class GamePanel extends JPanel implements KeyListener {
     private void buildHall(int loc) {
         MapBuilder hb = new MapBuilder(HALL_COLS, 12, '#');
         hb.rect(1, 4, HALL_COLS - 2, 7, '.');
-        for (int i = loc == LOCS ? 3 : 0; i < roomsIn(loc); i++) hb.set(DOOR_COL[i], doorRowInHall(i + 1), (char) ('1' + i));   // у Гордыни одна дверь
+        for (int i = 0; i < roomsIn(loc); i++) hb.set(DOOR_COL[i], doorRowInHall(i + 1), (char) ('1' + i));
         hb.set(HALL_COLS - 1, 6, '8');
         if (loc == 2) hb.set(5, 5, 'C');                       // в коридоре Алчности сидит кошка — она пойдёт с Эльзой до конца игры
         Room hall = new Room("Коридор · " + SIN_NAMES[loc - 1], hb.build());
@@ -459,13 +450,12 @@ public class GamePanel extends JPanel implements KeyListener {
         hall.basement = true;                                  // кирпичные стены и железные двери (общее для всех локаций)
         hall.look = Room.Look.VOID;                            // почти чёрное оформление
         hall.title = "ЛОКАЦИЯ " + loc;
-        hall.subtitle = loc == LOCS ? SIN_NAMES[loc - 1] + ": одна большая комната — твоё прошлое. Берегись стрел!"
-                : SIN_NAMES[loc - 1] + (roomsIn(loc) == 3 ? ": три двери открываются по порядку. Берегись стрел!" : ": четыре двери открываются по порядку. Берегись стрел!");
-        for (int i = loc == LOCS ? 3 : 0; i < roomsIn(loc); i++) {
+        hall.subtitle = SIN_NAMES[loc - 1] + (roomsIn(loc) == 3 ? ": три двери открываются по порядку. Берегись стрел!" : ": четыре двери открываются по порядку. Берегись стрел!");
+        for (int i = 0; i < roomsIn(loc); i++) {
             char c = (char) ('1' + i);
             hall.addDoor(c, trialKey(loc, i + 1), 3, 9);
             hall.doorTint.put(c, SIN_THEMES[loc - 1].base);
-            hall.doorLabel.put(c, loc == LOCS ? "ПРОШЛОЕ" : "КОМНАТА " + (i + 1));
+            hall.doorLabel.put(c, "КОМНАТА " + (i + 1));
         }
         hall.addDoor('8', roadKey(loc), 3, 9);
         hall.doorTint.put('8', new Color(240, 200, 60));
@@ -484,7 +474,7 @@ public class GamePanel extends JPanel implements KeyListener {
     private void refreshHallLocks(int loc) {
         Room hall = rooms.get(hallKey(loc));
         hall.lockedDoors.clear();
-        int next = loc == LOCS ? (done.contains("s" + LOCS) ? -1 : 3) : roomsDone(loc);
+        int next = roomsDone(loc);
         for (int i = 0; i < roomsIn(loc); i++) if (i != next) hall.lockedDoors.add((char) ('1' + i));
     }
 
@@ -543,7 +533,7 @@ public class GamePanel extends JPanel implements KeyListener {
     // Комнаты 1-3 каждой локации: слева цель (свеча / предметы / тотемы), ворота 'G', дальше дорога ловушек к выходу.
     // В одной локации три комнаты всегда с тремя разными целями; глубже — больше ловушек.
     private Room trial(int loc, int n) {
-        if (loc > 2 && loc != 3 && loc != 4 && loc != 5 && n == fillerIndex(loc)) return fillerRoom(loc, n);   // в каждой локации одна комната — «пустышка» с одними ловушками
+        if (loc > 2 && loc != 3 && loc != 4 && loc != 5 && loc != 7 && n == fillerIndex(loc)) return fillerRoom(loc, n);   // в каждой локации одна комната — «пустышка» с одними ловушками
         int cols = 56 + loc * 2;
         MapBuilder b = MapBuilder.side(cols);
         Random rnd = new Random(loc * 1000L + n * 17L);
@@ -553,7 +543,8 @@ public class GamePanel extends JPanel implements KeyListener {
         if (loc == 4 && n == 1) kind = 5;                      // Похоть: комната с нарядами — загадка с платьем
         if (loc == 4 && n == 2) kind = 3;                      // Похоть: Крис
         if (loc == 5 && n <= 2) kind = 5;                      // Чревоугодие: две иллюзии — фуршет (еда тает) и столовая слуг (стул и гости — галлюцинация)
-        if (loc == 6) kind = n == 1 ? 5 : 6;                   // Лень: ванная — загадка, кровать — выбор «спать / не спать»
+        if (loc == 6) kind = n == 1 ? 5 : 6;
+        if (loc == 7) kind = 5;                                // Гордыня: платья и пазл с семьёй                   // Лень: ванная — загадка, кровать — выбор «спать / не спать»
         b.set(8, 9, '#');
         if (loc >= 2) pit(b, 27, 27);
         switch (kind) {
@@ -622,6 +613,12 @@ public class GamePanel extends JPanel implements KeyListener {
                             : "Комната 2 из 3: столовая слуг — для Эльзы нет места";
                     hint = n == 1 ? "Возьми блюда со стола (E). Присмотрись к ним — и к кошке: она тянется только к настоящему"
                             : "Свободный стул — приманка? Иллюзии рассеиваются мечом (L). Кошка на плечах не обманется";
+                } else if (loc == 7) {                              // Гордыня: платья и пазл
+                    r.goalLabel = n == 1 ? "выбери настоящие платья" : "собери картину";
+                    r.subtitle = n == 1 ? "Комната 1 из 3: платья — выбери те, что были её настоящим прошлым"
+                            : "Комната 2 из 3: семейный зал — собери картину семьи";
+                    hint = n == 1 ? "Настоящие платья Эльзы просты и потёрты, на подоле вышита «Э». Выбирай их (E) — но с каждым верным выбором в комнате темнее"
+                            : "Подойди к разбитой картине на мольберте (E). Стрелки — выбрать кусок, E — взять и поменять местами";
                 } else if (loc == 6) {                              // Лень: ванная
                     r.goalLabel = "реши, что оставить";
                     r.subtitle = "Комната 1 из 3: ванная — смыть прошлое или оставить?";
@@ -687,6 +684,7 @@ public class GamePanel extends JPanel implements KeyListener {
         else if (loc == 4) decorateLust(r, n);
         else if (loc == 5) decorateGluttony(r, n);
         else if (loc == 6) decorateSloth(r, n);
+        else if (loc == 7) decoratePride(r, n);
         return r;
     }
 
@@ -1059,6 +1057,43 @@ public class GamePanel extends JPanel implements KeyListener {
         }
     }
 
+    // Гордыня: комната 1 — зал платьев (выбери настоящие; каждый верный выбор затемняет комнату), комната 2 — семейный зал (пазл),
+    // комната 3 (грех) — пустой зал с псевдо-джинном, она собрана в buildRooms().
+    private void decoratePride(Room r, int n) {
+        if (n == 1) {
+            r.props.add(Prop.plaque(19, 3, "ЗАЛ ПЛАТЬЕВ"));
+            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 12, 9, null,
+                    "Большая комната с манекенами. На них — старые платья Эльзы.",
+                    "Эльза|Это я.",
+                    "Пауза.",
+                    "Эльза|До всего этого.",
+                    "Эльза|До голода.",
+                    "Эльза|До страха.",
+                    "Эльза|До них.",
+                    "Она касается платья.",
+                    "Эльза|Я хочу снова стать ею."));
+            int[] order = shuffled(6, new Random(), true);         // три настоящих платья (0..2) и три «из мечты» (3..5) стоят вперемешку
+            int[] cols = {14, 16, 18, 20, 22, 24};
+            for (int i = 0; i < 6; i++) {
+                Prop d = Prop.action(Prop.Kind.PRIDE_DRESS, cols[i], 9, "PDRESS");
+                d.want = order[i];
+                d.fake = order[i] >= 3;
+                r.props.add(d);
+            }
+        } else if (n == 2) {
+            r.props.add(Prop.plaque(18, 3, "СЕМЕЙНЫЙ ЗАЛ"));
+            r.props.add(Prop.talk(Prop.Kind.FAMILY, 14, 9, null,
+                    "Образы родителей Эльзы. Они улыбаются.",
+                    "Эльза|Мама... папа...",
+                    "Эльза|Я всё ещё помню вас.",
+                    "Она подходит ближе.",
+                    "Эльза|Я ведь должна была жить так всегда.",
+                    "Пауза.",
+                    "Эльза|Почему вы оставили меня одну?"));
+            r.props.add(Prop.action(Prop.Kind.FAMILY_PUZZLE, 22, 9, "JIGSAW"));
+        }
+    }
+
     // эффект после сценки (ванна, кровать)
     private String propEffect(Prop p) {
         if (p.effect == null) return "";
@@ -1382,6 +1417,8 @@ public class GamePanel extends JPanel implements KeyListener {
             case "PEDESTAL" -> carryCrest < 0 ? "Сначала возьми вазу" : "E — поставить вазу";
             case "SEQ" -> p.kind == Prop.Kind.PORTRAIT ? "E — поставить портрет: " + Prop.FAMILY_NAMES[p.want]
                     : "E — выбрать: " + Prop.ITEM_NAMES[p.want];
+            case "PDRESS" -> "E — выбрать: " + Prop.PDRESS_NAMES[p.want];
+            case "JIGSAW" -> "E — сложить картину";
             case "BITEM" -> "E — бросить в воду: " + Prop.BITEM_NAMES[Math.floorMod(p.want, 4)];
             case "BLEAVE" -> "E — отойти от воды и оставить всё как есть";
             case "HMARK" -> "E — прочитать метку";
@@ -1545,9 +1582,146 @@ public class GamePanel extends JPanel implements KeyListener {
                 say("", "Эльза|Значит, всё-таки деньги.");
             }
             case "BITEM" -> bathThrow(p);
+            case "PDRESS" -> {
+                if (p.fake) {                                            // платье из мечты, а не из жизни
+                    p.flash = 30;
+                    showMessage("«" + Prop.PDRESS_NAMES[p.want] + "» — из мечты, а не из жизни. На подоле нет её «Э»");
+                    return;
+                }
+                p.solved = true;                                         // настоящее платье: комната темнеет
+                int got = prideChosen();
+                prideTarget = got / 3.0;
+                if (got < 3) {
+                    showMessage(got == 1 ? "Это её платье. Свет в комнате стал тусклее (1/3)"
+                            : "Ещё одно настоящее платье. Комната темнеет (2/3)");
+                } else {
+                    unlockExit("Все три платья — настоящие.");
+                    say("", "Эльза|Они были моими.",
+                            "Эльза|Но почему здесь стало так темно?",
+                            "Эльза|Чем сильнее я тянусь к тому времени, тем меньше света вокруг.");
+                }
+            }
+            case "JIGSAW" -> startJigsaw(p);
             case "BLEAVE" -> bathLeave();
             case "HMARK" -> readMark(p);
             default -> { }
+        }
+    }
+
+    // ====== ЗАГАДКИ ГОРДЫНИ ======
+    private int prideChosen() {
+        int n = 0;
+        for (Prop q : current.props) if (q.kind == Prop.Kind.PRIDE_DRESS && q.solved && !q.fake) n++;
+        return n;
+    }
+
+    private void updatePride() {
+        if (prideDark < prideTarget) prideDark = Math.min(prideTarget, prideDark + 0.006);
+        else if (prideDark > prideTarget) prideDark = Math.max(prideTarget, prideDark - 0.02);
+    }
+
+    // комната темнеет по краям, вокруг Эльзы остаётся пятно света, которое сжимается с каждым верным платьем
+    private void drawPrideDark(Graphics2D g, int px, int py) {
+        float k = (float) Math.min(1.0, prideDark);
+        float rad = 780f - 470f * k;
+        RadialGradientPaint p = new RadialGradientPaint(new Point2D.Float(px, py), rad,
+                new float[]{0.25f, 1f},
+                new Color[]{new Color(6, 8, 22, (int) (25 * k)), new Color(6, 8, 22, (int) (110 + 120 * k))});
+        g.setPaint(p);
+        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
+    }
+
+    // пазл 3x2: куски меняются местами по двое
+    private void startJigsaw(Prop p) {
+        jigProp = p;
+        if (!jigReady) {
+            Random rnd = new Random();
+            int fixed;
+            do {
+                int[] a = shuffled(6, rnd, true);
+                System.arraycopy(a, 0, jig, 0, 6);
+                fixed = 0;
+                for (int i = 0; i < 6; i++) if (jig[i] == i) fixed++;
+            } while (fixed > 1);
+            jigReady = true;
+        }
+        jigCur = 0;
+        jigSel = -1;
+        jigWin = 0;
+        up = down = left = right = jump = false;
+        player.moving = false;
+        checkTimer = 0;
+        checkVase = null;
+    }
+
+    private void jigMove(int dc, int dr) {
+        int c = (jigCur % 3 + dc + 3) % 3, r = (jigCur / 3 + dr + 2) % 2;
+        jigCur = r * 3 + c;
+    }
+
+    private void jigSelect() {
+        if (jigWin > 0) return;
+        if (jigSel < 0) { jigSel = jigCur; return; }
+        if (jigSel != jigCur) {
+            int t = jig[jigSel];
+            jig[jigSel] = jig[jigCur];
+            jig[jigCur] = t;
+        }
+        jigSel = -1;
+        boolean ok = true;
+        for (int i = 0; i < 6; i++) if (jig[i] != i) ok = false;
+        if (ok) jigWin = 110;                                    // секунду-две показываем собранную картину
+    }
+
+    private void finishJigsaw() {
+        Prop p = jigProp;
+        jigProp = null;
+        if (p == null) return;
+        p.solved = true;
+        p.action = null;
+        unlockExit("Картина собрана.");
+        say("", "Картина вспыхнула тёплым светом. Родители на ней улыбаются.",
+                "Эльза|Нет.",
+                "Эльза|Не забирайте их снова.");
+    }
+
+    private void drawJigsaw(Graphics2D g) {
+        g.setColor(new Color(0, 0, 0, 242));
+        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
+        int pw = 160, ph = 120, bx = (Room.VIEW_W - 480) / 2, by = (Room.VIEW_H - 240) / 2 + 10;
+        g.setFont(new Font("Monospaced", Font.BOLD, 28));
+        g.setColor(new Color(250, 230, 170));
+        drawCentered(g, "СЕМЬЯ", by - 64);
+        g.setFont(new Font("Monospaced", Font.PLAIN, 16));
+        g.setColor(Color.WHITE);
+        drawCentered(g, jigWin > 0 ? "Они снова вместе." : "Стрелки — выбрать кусок, E — взять и поменять местами, ESC — отойти", by - 34);
+        g.setColor(new Color(110, 78, 50));
+        g.fillRect(bx - 10, by - 10, 500, 260);
+        for (int i = 0; i < 6; i++) {
+            int piece = jig[i], dx = bx + (i % 3) * pw, dy = by + (i / 3) * ph;
+            Shape oc = g.getClip();
+            AffineTransform ot = g.getTransform();
+            g.clipRect(dx, dy, pw, ph);
+            g.translate(dx - (piece % 3) * pw, dy - (piece / 3) * ph);
+            Prop.paintFamilyPicture(g);
+            g.setTransform(ot);
+            g.setClip(oc);
+            g.setColor(piece == i ? new Color(120, 230, 150, 170) : new Color(0, 0, 0, 150));
+            g.drawRect(dx + 1, dy + 1, pw - 3, ph - 3);
+            if (i == jigSel) {
+                g.setColor(new Color(255, 220, 90, 90));
+                g.fillRect(dx, dy, pw, ph);
+            }
+        }
+        if (jigWin > 0) {
+            g.setColor(new Color(255, 230, 150, 40 + (int) (Math.sin(tick * 0.2) * 20)));
+            g.fillRect(bx, by, 480, 240);
+        } else {
+            Stroke os = g.getStroke();
+            g.setStroke(new BasicStroke(3f));
+            g.setColor(Color.WHITE);
+            g.drawRect(bx + (jigCur % 3) * pw + 2, by + (jigCur / 3) * ph + 2, pw - 5, ph - 5);
+            g.setStroke(os);
         }
     }
 
@@ -2066,6 +2240,11 @@ public class GamePanel extends JPanel implements KeyListener {
         slowTimer = poisonTimer = darkTimer = weakTimer = 0;
         distortTimer = 0;
         sleepDark = 0;
+        prideDark = prideTarget = 0;
+        jigProp = null;
+        jigReady = false;
+        jigSel = -1;
+        jigWin = 0;
         blackTimer = 0;
         slowPermanent = false;
         checkTimer = 0;
@@ -2154,6 +2333,9 @@ public class GamePanel extends JPanel implements KeyListener {
     private void enterRoom(Room r) {
         sleepThought = false;
         current = r;
+        int chosen = 0;                                           // Гордыня, комната 1: сколько верных платьев уже выбрано — столько и темноты
+        for (Prop q : r.props) if (q.kind == Prop.Kind.PRIDE_DRESS && q.solved && !q.fake) chosen++;
+        prideTarget = prideDark = chosen / 3.0;
         titleTimer = r.title != null ? 170 : 0;
         if (r.choice != null) r.choice.showCat = pet == null;     // кошка на плечах — вторую у рыбы не рисуем
     }
@@ -2180,9 +2362,11 @@ public class GamePanel extends JPanel implements KeyListener {
         if (blackTimer > 0) { if (--blackTimer == 0) blackText = "…ах…"; return; }            // тёмный экран: мир стоит
         if (messageTimer > 0) messageTimer--;
         if (titleTimer > 0) titleTimer--;
+        updatePride();
         if (invOpen || won) return;                              // в инвентаре мир стоит
         if (dialog != null) { dialogT++; return; }               // во время реплики мир тоже стоит
         if (inputProp != null) return;                           // и пока открыто окно ввода у зеркала
+        if (jigProp != null) { if (jigWin > 0 && --jigWin == 0) finishJigsaw(); return; }   // и пока открыт пазл
         if (mashProp != null) { updateMash(); return; }          // во время «вырвись» мир тоже стоит
 
         // ----- эффекты -----
@@ -2434,6 +2618,10 @@ public class GamePanel extends JPanel implements KeyListener {
             effect = applyCurse();
         }
         unlockExit(null);
+        if ("s7".equals(current.key)) {                       // джинн: при любом выборе экран темнеет, и он говорит «я тебя услышал»
+            blackText = "Джинн: «Я тебя услышал»";
+            blackTimer = 230;
+        }
         if ("r6_2".equals(current.key)) {                     // кровать: свет возвращается; уснула — тёмный экран и слабость
             sleepDark = 0;
             if (!opt.good()) {
@@ -2552,7 +2740,7 @@ public class GamePanel extends JPanel implements KeyListener {
         sins.good(r.key);                                          // для комнат-грехов (s1..s7); для остальных ничего не делает
         refreshHallLocks(loc);
         int n = roomsDone(loc);
-        if (n == roomsIn(loc) || loc == LOCS) {
+        if (n == roomsIn(loc)) {
             hall.exitLocked = false;
             showMessage("Локация пройдена! В конце коридора открыта дверь СПУСК");
         } else {
@@ -2701,6 +2889,7 @@ public class GamePanel extends JPanel implements KeyListener {
         if (current.sideView) drawVignette(overlay);
         if (darkTimer > 0) drawDarkness(overlay, player.centerX() - cx, player.centerY() - cy);
         if (sleepDark > 0.01) drawSleep(overlay);
+        if (prideDark > 0.01) drawPrideDark(overlay, player.centerX() - cx, player.centerY() - cy);
         overlay.dispose();
 
         drawHud((Graphics2D) g);
@@ -2708,6 +2897,7 @@ public class GamePanel extends JPanel implements KeyListener {
         if (dialog != null) drawDialog((Graphics2D) g);
         if (mashProp != null) drawMash((Graphics2D) g);
         if (inputProp != null) drawInput((Graphics2D) g);
+        if (jigProp != null) drawJigsaw((Graphics2D) g);
         if (invOpen) drawInventory((Graphics2D) g);
         if (won) drawVictory((Graphics2D) g);
         if (blackTimer > 0) drawBlackout((Graphics2D) g);
@@ -2866,8 +3056,7 @@ public class GamePanel extends JPanel implements KeyListener {
     private String objectiveText() {
         Room r = current;
         if (isHall(r)) {
-            return r.exitLocked ? (r.key.charAt(1) - '0' == LOCS ? "Цель: войди в большую комнату Гордыни"
-                    : "Цель: пройди " + roomsIn(r.key.charAt(1) - '0') + " комнаты по порядку (" + roomsDone(r.key.charAt(1) - '0') + "/" + roomsIn(r.key.charAt(1) - '0') + ")")
+            return r.exitLocked ? ("Цель: пройди " + roomsIn(r.key.charAt(1) - '0') + " комнаты по порядку (" + roomsDone(r.key.charAt(1) - '0') + "/" + roomsIn(r.key.charAt(1) - '0') + ")")
                     : "Цель: спустись — дверь СПУСК в конце коридора";
         }
         if (r.key != null && r.key.startsWith("road")) return "Цель: пройди дорогу ловушек и спустись глубже";
@@ -3216,7 +3405,6 @@ public class GamePanel extends JPanel implements KeyListener {
     private void completeLocation(int loc) {
         Room hall = rooms.get(hallKey(loc));
         for (int n = 1; n <= roomsIn(loc); n++) {
-            if (loc == LOCS && n < 4) continue;               // у Гордыни одна комната
             String key = trialKey(loc, n);
             done.add(key);
             hall.doneDoors.add((char) ('0' + n));
@@ -3239,6 +3427,11 @@ public class GamePanel extends JPanel implements KeyListener {
         slowTimer = poisonTimer = darkTimer = weakTimer = 0;
         distortTimer = 0;
         sleepDark = 0;
+        prideDark = prideTarget = 0;
+        jigProp = null;
+        jigReady = false;
+        jigSel = -1;
+        jigWin = 0;
         slowPermanent = false;
         showMessage("Админ: сердца восстановлены, эффекты сняты");
     }
@@ -3254,7 +3447,7 @@ public class GamePanel extends JPanel implements KeyListener {
         List<String> out = new ArrayList<>();
         for (int loc = 1; loc <= LOCS; loc++) {
             out.add(hallKey(loc));
-            if (loc != LOCS) for (int n = 1; n < roomsIn(loc); n++) out.add(trialKey(loc, n));
+            for (int n = 1; n < roomsIn(loc); n++) out.add(trialKey(loc, n));
             out.add(trialKey(loc, roomsIn(loc)));
             out.add(roadKey(loc));
         }
@@ -3354,6 +3547,19 @@ public class GamePanel extends JPanel implements KeyListener {
                 inputProp = null;
                 showMessage("Эльза отвернулась от зеркала. Подойди и посмотри ещё раз (E)");
             }
+            return;
+        }
+
+        if (jigProp != null) {                                           // пазл с картиной семьи
+            if (jigWin > 0) return;
+            if (k == KeyEvent.VK_ESCAPE) {
+                jigProp = null;
+                showMessage("Эльза отошла от картины. Подойди и сложи её (E)");
+            } else if (k == KeyEvent.VK_LEFT || k == KeyEvent.VK_A) jigMove(-1, 0);
+            else if (k == KeyEvent.VK_RIGHT || k == KeyEvent.VK_D) jigMove(1, 0);
+            else if (k == KeyEvent.VK_UP || k == KeyEvent.VK_W) jigMove(0, -1);
+            else if (k == KeyEvent.VK_DOWN || k == KeyEvent.VK_S) jigMove(0, 1);
+            else if (k == KeyEvent.VK_SPACE || k == KeyEvent.VK_ENTER || isKey(e, KeyEvent.VK_E, 'у')) jigSelect();
             return;
         }
 
