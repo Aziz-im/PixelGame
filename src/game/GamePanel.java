@@ -20,7 +20,6 @@ import java.util.Set;
 public class GamePanel extends JPanel implements KeyListener {
     // ===== настройки =====
     private static final int    SPEED           = 3;      // скорость ходьбы
-    private static final int    ILLUSION_HITS = 3;        // сколько ударов мечом нужно, чтобы развеять иллюзию столовой
     private static final int    ATTACK_COOLDOWN = 24;     // пауза между взмахами (кадры)
     private static final double CAM_SMOOTH      = 0.12;   // плавность камеры
     private static final int    SLOT = 72, GAP = 12;      // размеры слотов инвентаря
@@ -41,16 +40,6 @@ public class GamePanel extends JPanel implements KeyListener {
     // Порядок локаций (двери открываются по очереди): 1 Гнев, 2 Алчность, 3 Зависть, 4 Похоть, 5 Чревоугодие, 6 Уныние, 7 Гордыня
     private static final Theme[] SIN_THEMES = {Theme.WRATH, Theme.GREED, Theme.ENVY, Theme.LUST,
             Theme.GLUTTONY, Theme.SLOTH, Theme.PRIDE};
-    // пиксельные фоны PixelBackground, в том же порядке локаций
-    private static final PixelBackground.Sin[] PX_SINS = {PixelBackground.Sin.WRATH, PixelBackground.Sin.GREED,
-            PixelBackground.Sin.ENVY, PixelBackground.Sin.LUST, PixelBackground.Sin.GLUTTONY,
-            PixelBackground.Sin.SLOTH, PixelBackground.Sin.PRIDE};
-    // какая картинка комнаты PixelBackground стоит в n-й комнате локации (0 = общий фон греха)
-    private static int pxRoomFor(int loc, int n) {
-        if (loc == 1) return n == 2 ? 2 : n <= 3 ? 1 : 0;       // Гнев: музей и семья Осмаров — музей портретов, комната 2 — комната наказаний
-        if (loc == 2) return n == 1 ? 1 : 3;                    // Алчность: приют — рваные игрушки, работница и кабинет — кабинет сотрудников
-        return n;                                               // у остальных номера совпадают (лишние уйдут в общий фон)
-    }
     private static final String[] SIN_NAMES = {"Гнев", "Алчность", "Зависть", "Похоть",
             "Чревоугодие", "Уныние", "Гордыня"};
 
@@ -60,13 +49,6 @@ public class GamePanel extends JPanel implements KeyListener {
     private Room current;
     private final Player player = new Player();
     private Cat pet;                                      // кот, которого ты спас
-    private int carryCrest = -1;                          // Гнев, комната 1: герб вазы в руках (-1 — пусто)
-    private int carryGDress = -1;                        // Зависть, комната 1: платье в руках (0..3; -1 — пусто)
-    private int carryTItem = -1;                          // Зависть, комната 2: предмет со стола в руках (0..5; -1 — пусто)
-    private Prop inputProp;                               // Зависть, комната 3: зеркало с открытым окном ввода (null — окна нет)
-    private final StringBuilder inputBuf = new StringBuilder();
-    private String inputMsg = "";
-    private int carryToy = -1;                            // Алчность, комната 1: игрушка в руках (0 кубики, 1 мишка, 2 мячик; -1 — пусто)
     private int tick;
     private final Timer timer = new Timer(16, e -> { tick++; update(); repaint(); });
 
@@ -77,11 +59,6 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // эффекты (в кадрах)
     private int slowTimer, poisonTimer, darkTimer, weakTimer;
-    private String blackText = "…ах…";                  // что написано на тёмном экране (стон / «Zzz…»)
-    private int distortTimer;                             // Лень: экран «плывёт» (Эльзе плохо в ванне)
-    private double sleepDark;                             // Лень, комната 2: чем дольше Эльза не ложится, тем темнее экран (0..1)
-    private boolean sleepThought;                         // мысль «если усну…» уже прозвучала
-    private int blackTimer;                               // тёмный экран на секунду (провал «вырвись» у Криса): мир стоит, слышен стон
     private boolean slowPermanent;                        // после убийства кота
 
     // проверка вазы
@@ -97,7 +74,6 @@ public class GamePanel extends JPanel implements KeyListener {
     private String[] dialog;
     private int dialogIdx, dialogT;
     private Prop dialogProp;
-    private final Set<String> catIntro = new HashSet<>();     // в каких комнатах Чревоугодия кошка уже что-то «сказала» при входе
 
     // мини-игра «вырвись»: после диалога с Крисом / Себастьяном жми E или ПРОБЕЛ как можно быстрее
     private static final int MASH_TIME = 540;             // 9 секунд на попытку
@@ -184,15 +160,13 @@ public class GamePanel extends JPanel implements KeyListener {
         Room r = new Room(idx + ". " + name, b.build());
         r.sideView = true;
         r.theme = SIN_THEMES[idx - 1];
-        r.pxSin = PX_SINS[idx - 1];
-        r.pxRoom = idx == 1 ? 0 : roomsIn(idx);                // комната-грех — последняя комната локации
         r.title = name.toUpperCase();
         r.subtitle = sub;
         r.exitChar = '2';
         r.exitLocked = true;
         r.addSign(signCol, story);
-        r.addDoor('1', hallKey(idx), DOOR_COL[roomsIn(idx) - 1], hallReturnRow(roomsIn(idx)));
-        r.addDoor('2', hallKey(idx), DOOR_COL[roomsIn(idx) - 1], hallReturnRow(roomsIn(idx)));
+        r.addDoor('1', hallKey(idx), DOOR_COL[3], hallReturnRow(4));
+        r.addDoor('2', hallKey(idx), DOOR_COL[3], hallReturnRow(4));
         return r;
     }
 
@@ -205,7 +179,7 @@ public class GamePanel extends JPanel implements KeyListener {
         // ---------- 7 ЛОКАЦИЙ: коридор + комнаты 1-3 + дорога спуска (4-я комната — грех, ниже) ----------
         for (int loc = 1; loc <= LOCS; loc++) {
             buildHall(loc);
-            if (loc != LOCS) for (int n = 1; n < roomsIn(loc); n++) add(trialKey(loc, n), trial(loc, n));   // Гордыня — одна большая комната
+            if (loc != LOCS) for (int n = 1; n <= 3; n++) add(trialKey(loc, n), trial(loc, n));   // Гордыня — одна большая комната
             add(roadKey(loc), road(loc));
         }
 
@@ -237,84 +211,61 @@ public class GamePanel extends JPanel implements KeyListener {
         gate(b2, 34);
         b2.set(47, 9, '^');
         pit(b2, 55, 55);
-        Room r2 = sin(2, b2, "Кабинет сотрудников. На столе лежит мешочек с деньгами. Взять или нет?",
+        Room r2 = sin(2, b2, "Кабинет сотрудников приюта. На столе лежат деньги. Взять или нет?",
                 new Decision(Decision.Kind.MONEY, 25, 9,
-                        new Decision.Option("Не брать", true, "Ты не тронул деньги приюта. На душе стало легко."),
-                        new Decision.Option("Взять", false, "Ты забрал деньги сирот. Алчность прокляла тебя.")),
+                        new Decision.Option("Не брать деньги", true, "Ты не тронул деньги приюта. На душе стало легко."),
+                        new Decision.Option("Взять деньги", false, "Ты забрал деньги сирот. Алчность прокляла тебя.")),
                 "Деньги приюта. Они тебе нужнее — или сиротам?");
         r2.props.add(Prop.plaque(19, 3, "КАБИНЕТ СОТРУДНИКОВ"));
         r2.props.add(new Prop(Prop.Kind.CABINET, 18, 9));
         r2.props.add(new Prop(Prop.Kind.CABINET, 20, 9));
         r2.props.add(Prop.talk(Prop.Kind.DESK, 25, 9, null,
-                "Эльза|Вот они.",
-                "Эльза|Столько денег...",
-                "Эльза|За них можно купить еду. Можно купить свободу. Можно купить молчание.",
-                "Пауза.",
-                "Эльза|А можно ли купить прощение?"));
+                "Эльза|Деньги приюта... Мне они сейчас так нужны.",
+                "Эльза|Но это деньги сирот."));
         hidden(r2, 38, 43);
         saw(r2, 49, 53);
         add("s2", r2);
 
-        // ---------- 3. ЗАВИСТЬ (зелёный): комнаты 1 — две девочки, 2 — праздничный стол, 3 — Анна (зеркало, ответ вписывается словом) ----------
+        // ---------- 3. ЗАВИСТЬ (зелёный): дочь ----------
         MapBuilder b3 = MapBuilder.side(64);
         b3.set(12, 9, '^');
         pit(b3, 15, 15);
         gate(b3, 38);
         pit(b3, 41, 45);                          // пропасть под хрупким мостом
         pit(b3, 57, 57);
-        Room r3 = sinRoom(3, b3, "Анна стоит в центре комнаты. Перед тобой зеркало: что ты ей ответишь?", 28,
+        Room r3 = sin(3, b3, "Анна, дочь Осмаров, жила в роскоши. Простить её или поднять меч?",
+                new Decision(Decision.Kind.GIRL, 29, 9,
+                        new Decision.Option("Простить Анну", true, "Эльза простила Анну. Зависть отступила."),
+                        new Decision.Option("Поднять меч на Анну", false, "Эльза подняла меч на Анну. Зависть победила.")),
                 "Анна Осмар. У неё было всё, чего не было у тебя");
-        r3.goal = Room.Goal.PUZZLE;
-        r3.goalLabel = "ответь зеркалу";
         r3.props.add(Prop.plaque(29, 3, "КОМНАТА АННЫ ОСМАР"));
-        r3.props.add(new Prop(Prop.Kind.ANNA, 23, 9));
-        Prop annaTalk = Prop.talk(Prop.Kind.PLAQUE, 20, 9, null,
-                "Эльза|Анна...",
-                "Эльза|Ты ведь ничего мне не сделала.",
-                "Пауза.",
-                "Эльза|Тогда почему я так тебя ненавижу?",
-                "Анна молчит.",
-                "Эльза|Я смотрела на тебя и видела всю жизнь, которую у меня забрали.");
-        r3.props.add(annaTalk);
-        Prop mirror = Prop.talk(Prop.Kind.MIRROR, 32, 9, null,
-                "Перед Эльзой зеркало.",
-                "Эльза|Это же... не я.",
-                "Эльза|В зеркале — Анна.",
-                "Пауза.",
-                "Эльза|Что я должна ей сказать?");
-        mirror.input = true;                                   // после сценки открывается окно ввода: «ненавижу» или «прощаю»
-        r3.props.add(mirror);
-        hidden(r3, 8, 18);
+        r3.props.add(Prop.talk(Prop.Kind.DOLL, 22, 9, null,
+                "Эльза|Комната Анны, дочери Осмаров. Платья, игрушки, тёплая постель...",
+                "Эльза|У неё было всё. А у меня не было ничего.",
+                "Эльза|Почему ей — всё, а мне — ничего?"));
+        hidden(r3, 8, 20, 24);
         crumble(r3, 41, 45, 10);
         hidden(r3, 49);
         saw(r3, 51, 55);
         add("s3", r3);
 
-        // ---------- 4. ПОХОТЬ (розовый): комнаты 1 — одежда, 2 — Крис (вырваться), 3 — Себастьян (грех-комната, дверь откроется в любом случае) ----------
+        // ---------- 4. ПОХОТЬ (розовый): встреча с тенью из прошлого ----------
         MapBuilder b4 = MapBuilder.side(66);
         b4.set(12, 9, '^');
         pit(b4, 24, 27);
         gate(b4, 39);
         pit(b4, 50, 50);
-        Room r4 = sinRoom(4, b4, "Себастьян не нападает. Он протягивает руку и обещает открыть дверь.", 30,
-                "Себастьян — тот, кто однажды открыл ей дверь");
+        Room r4 = sinRoom(4, b4, "Крис не отпустит просто так. Вырвись из его рук!", 30,
+                "Крис — тот, кто не давал тебе покоя во время службы и заточения");
         r4.goal = Room.Goal.ESCAPE;
-        r4.goalLabel = "открой дверь";
-        Prop seb = Prop.mash(Prop.Kind.SEBASTIAN, 34, 9,
-                "Себастьян открыл дверь. Ворота открыты — пройди дорогу ловушек к выходу.",
-                "Себастьян открыл дверь. Ворота открыты — пройди дорогу ловушек к выходу.",
-                "Себастьян протягивает Эльзе руку.",
-                "Эльза|Ты...",
-                "Пауза.",
-                "Эльза|Почему именно здесь?",
-                "Себастьян|Пойдём. Я знаю выход.",
-                "Эльза|Я уже однажды тебе поверила.",
-                "Себастьян|Но я же не обманул тебя тогда.");
-        seb.alwaysOpen = true;                                 // тапалка есть, но дверь откроется в любом случае
-        seb.winLine = "Спасибо... что тогда ты действительно открыл дверь.";
-        seb.mashTitle = "ОТКРОЙ ДВЕРЬ!";
-        seb.mashHint = "Жми E или ПРОБЕЛ — вместе с Себастьяном, пока дверь не поддастся";
-        r4.props.add(seb);
+        r4.goalLabel = "вырвись";
+        r4.props.add(Prop.mash(Prop.Kind.CHRIS, 34, 9,
+                "Эльза вырвалась и убежала от Криса. Похоть не взяла над ней верх.",
+                "Эльза не смогла вырваться. Она согрешила похотью.",
+                "Крис|Вот ты где, Эльза. Я скучал по тебе.",
+                "Эльза|Крис... Не подходи ко мне.",
+                "Крис|Пойдём со мной. Уединимся, как раньше. Тебя никто не найдёт.",
+                "Эльза|Нет! Я больше не твоя вещь. Не трогай меня!"));
         crumble(r4, 24, 27, 10);
         flame(r4, 43, 0);
         hidden(r4, 47);
@@ -322,66 +273,51 @@ public class GamePanel extends JPanel implements KeyListener {
         flame(r4, 61, 100);
         add("s4", r4);
 
-        // ---------- 5. ЧРЕВОУГОДИЕ (оранжевый): комнаты 1 — фуршет (еда тает), 2 — столовая слуг (иллюзия), 3 — мусорная (настоящая рыба) ----------
+        // ---------- 5. ЧРЕВОУГОДИЕ (оранжевый): накрытый стол ----------
         MapBuilder b5 = MapBuilder.side(64);
         b5.set(10, 9, '^');
         pit(b5, 24, 24);
         gate(b5, 37);
         pit(b5, 49, 49);
         b5.set(56, 9, '^');
-        Room r5 = sin(5, b5, "Мусорная комната. Единственная настоящая рыба — отдать кошке или съесть?",
+        Room r5 = sin(5, b5, "Комната отходов. Единственная настоящая рыба — отдать кошке или съесть?",
                 new Decision(Decision.Kind.FISH, 31, 9,
                         new Decision.Option("Отдать рыбу кошке", true, "Эльза отдала рыбу кошке. Та громко мурчит."),
                         new Decision.Option("Съесть рыбу самой", false, "Эльза съела рыбу сама. Чревоугодие победило.")),
-                "Рыба. Единственное настоящее здесь — и кошка смотрит на неё голодными глазами");
-        r5.pxRoom = 4;                                           // фон «комната отходов» (у Чревоугодия в PixelBackground четыре картинки, а комнат три)
-        r5.props.add(Prop.plaque(20, 3, "МУСОРНАЯ КОМНАТА"));
-        Prop heap = new Prop(Prop.Kind.TRASH, 13, 9);
-        heap.catHint = "Кошка на плечах замяукала и потянулась к объедкам: они настоящие.";
-        r5.props.add(heap);
-        r5.props.add(new Prop(Prop.Kind.TRASH, 16, 9));
+                "Рыба. Кошка смотрит на неё голодными глазами");
+        r5.props.add(Prop.plaque(20, 3, "КОМНАТА ОТХОДОВ"));
+        for (int c : new int[]{13, 16}) r5.props.add(new Prop(Prop.Kind.TRASH, c, 9));
         r5.props.add(Prop.talk(Prop.Kind.TRASH, 20, 9, null,
-                "Свалка отходов. На полу — куски еды.",
-                "Эльза|Вот где я действительно ела.",
-                "Эльза|Не за столом.",
-                "Эльза|Не на кухне.",
-                "Эльза|Там, где никто не видел."));
+                "Эльза|Отходы и мусор... Вот где я ела в плену. Объедки, кости, гнилые корки.",
+                "Эльза|Я рылась в этих отбросах, лишь бы не умереть с голоду."));
         r5.props.add(Prop.talk(Prop.Kind.TRASH, 27, 9, null,
                 "Кошка|Мяу! Мяу-мяу!",
-                "Эльза|Ты тоже голодна?"));
+                "Эльза|Рыба... Настоящая! Первая настоящая еда за столько времени.",
+                "Эльза|Я так голодна... Но кошка тоже голодна."));
         hidden(r5, 40, 53);
         saw(r5, 42, 46);
         flame(r5, 59, 40);
         add("s5", r5);
 
-        // ---------- 6. ЛЕНЬ (серо-голубой): течение сна тянет назад. Комнаты: 1 ванная, 2 кровать с кошкой, 3 её бывшая комната ----------
+        // ---------- 6. УНЫНИЕ (серо-голубой): течение сна тянет назад ----------
         MapBuilder b6 = MapBuilder.side(66);
         b6.set(8, 9, '^');
         pit(b6, 18, 18);
         gate(b6, 36);
         pit(b6, 43, 43);
         b6.set(59, 9, '^');
-        Room r6 = sin(6, b6, "Её бывшая комната. Прочти метки роста, потом: лечь на тряпку или взять игрушку и идти?",
-                new Decision(Decision.Kind.RAG, 33, 9,
-                        new Decision.Option("Лечь на тряпку и остаться", false, "Эльза свернулась на тряпке и не захотела вставать. Лень победила."),
-                        new Decision.Option("Взять игрушку и идти дальше", true, "Эльза взяла игрушку и встала. Лень отступила.")),
-                "Её комната: тряпка, старая игрушка и метки роста на стене");
-        r6.pxRoom = 4;                                           // фон «пустая комната (её угол)»: у Лени четыре картинки, а комнат три
-        r6.props.add(Prop.plaque(24, 3, "БЫВШАЯ КОМНАТА ЭЛЬЗЫ"));
-        r6.props.add(Prop.talk(Prop.Kind.PLAQUE, 19, 9, null,
-                "Почти пустая комната. Тряпка на полу. Старая игрушка.",
-                "Эльза|Это всё, что осталось.",
-                "Эльза|На косяках... царапины. Кто-то когда-то мерил мой рост.",
-                "Эльза|Я помню их по порядку. Снизу вверх."));
-        int[] markOrder = shuffled(5, RND, true);                // какая по высоте метка стоит в какой клетке — вперемешку
-        int[] markCols = {21, 23, 25, 27, 29};
-        for (int i = 0; i < markCols.length; i++) {
-            Prop mark = Prop.action(Prop.Kind.HEIGHT_MARK, markCols[i], 9, "HMARK");
-            mark.want = markOrder[i];
-            r6.props.add(mark);
-        }
+        Room r6 = sin(6, b6, "Её комната в том доме. Лечь на тряпку или взять игрушку и идти?",
+                new Decision(Decision.Kind.RAG, 30, 9,
+                        new Decision.Option("Лечь на тряпку и остаться", false, "Эльза свернулась на тряпке и не захотела вставать. Уныние победило."),
+                        new Decision.Option("Взять игрушку и идти дальше", true, "Эльза взяла игрушку и встала. Уныние отступило.")),
+                "Её комната: тряпка и одна игрушка");
+        r6.props.add(Prop.plaque(24, 3, "КОМНАТА ЭЛЬЗЫ"));
+        r6.props.add(Prop.talk(Prop.Kind.PLAQUE, 24, 9, null,
+                "Эльза|Моя комната в том доме... Если это можно так назвать.",
+                "Эльза|Здесь почти ничего не было. Тряпка, чтобы укрываться от мокрого и холодного пола.",
+                "Эльза|И одна игрушка. Больше у меня не было ничего."));
         r6.wind = 1;
-        hidden(r6, 12, 47);
+        hidden(r6, 22, 47);
         flame(r6, 39, 0);
         saw(r6, 49, 53);
         flame(r6, 56, 90);
@@ -427,23 +363,21 @@ public class GamePanel extends JPanel implements KeyListener {
     // ====== КЛЮЧИ КОМНАТ ======
     private static String hallKey(int loc)         { return "h" + loc; }
     private static String roadKey(int loc)         { return "road" + loc; }
-    // сколько комнат в локации: у Алчности три (приют, работница, кабинет), у Зависти три (две девочки, праздничный стол, Анна), у Похоти три (одежда, Крис, Себастьян), у Чревоугодия три (фуршет, столовая слуг, мусорная), у остальных четыре; последняя комната — грех
-    private static int roomsIn(int loc) { return loc == 2 || loc == 3 || loc == 4 || loc == 5 || loc == 6 ? 3 : 4; }
-    private static String trialKey(int loc, int n) { return n == roomsIn(loc) ? "s" + loc : "r" + loc + "_" + n; }   // последняя комната = грех s1..s7
+    private static String trialKey(int loc, int n) { return n == 4 ? "s" + loc : "r" + loc + "_" + n; }   // 4-я комната = грех s1..s7
     private static boolean isHall(Room r)          { return r != null && r.key != null && r.key.matches("h[1-7]"); }
-    private static boolean isGluttonyRoom(Room r)  { return r != null && r.key != null && r.key.matches("r5_[1-2]|s5"); }
+    private static boolean isGluttonyRoom(Room r)  { return r != null && r.key != null && r.key.matches("r5_[1-3]|s5"); }
 
     // {локация, номер комнаты} по ключу комнаты-испытания; null — если это не испытание
     private static int[] parseTrial(String key) {
         if (key == null) return null;
-        if (key.matches("s[1-7]")) return new int[]{key.charAt(1) - '0', roomsIn(key.charAt(1) - '0')};
+        if (key.matches("s[1-7]")) return new int[]{key.charAt(1) - '0', 4};
         if (key.matches("r[1-7]_[1-3]")) return new int[]{key.charAt(1) - '0', key.charAt(3) - '0'};
         return null;
     }
 
     private int roomsDone(int loc) {
         int n = 0;
-        for (int i = 1; i <= roomsIn(loc); i++) if (done.contains(trialKey(loc, i))) n++;
+        for (int i = 1; i <= 4; i++) if (done.contains(trialKey(loc, i))) n++;
         return n;
     }
 
@@ -451,7 +385,7 @@ public class GamePanel extends JPanel implements KeyListener {
     private void buildHall(int loc) {
         MapBuilder hb = new MapBuilder(HALL_COLS, 12, '#');
         hb.rect(1, 4, HALL_COLS - 2, 7, '.');
-        for (int i = loc == LOCS ? 3 : 0; i < roomsIn(loc); i++) hb.set(DOOR_COL[i], doorRowInHall(i + 1), (char) ('1' + i));   // у Гордыни одна дверь
+        for (int i = loc == LOCS ? 3 : 0; i < 4; i++) hb.set(DOOR_COL[i], doorRowInHall(i + 1), (char) ('1' + i));   // у Гордыни одна дверь
         hb.set(HALL_COLS - 1, 6, '8');
         if (loc == 2) hb.set(5, 5, 'C');                       // в коридоре Алчности сидит кошка — она пойдёт с Эльзой до конца игры
         Room hall = new Room("Коридор · " + SIN_NAMES[loc - 1], hb.build());
@@ -460,8 +394,8 @@ public class GamePanel extends JPanel implements KeyListener {
         hall.look = Room.Look.VOID;                            // почти чёрное оформление
         hall.title = "ЛОКАЦИЯ " + loc;
         hall.subtitle = loc == LOCS ? SIN_NAMES[loc - 1] + ": одна большая комната — твоё прошлое. Берегись стрел!"
-                : SIN_NAMES[loc - 1] + (roomsIn(loc) == 3 ? ": три двери открываются по порядку. Берегись стрел!" : ": четыре двери открываются по порядку. Берегись стрел!");
-        for (int i = loc == LOCS ? 3 : 0; i < roomsIn(loc); i++) {
+                : SIN_NAMES[loc - 1] + ": четыре двери открываются по порядку. Берегись стрел!";
+        for (int i = loc == LOCS ? 3 : 0; i < 4; i++) {
             char c = (char) ('1' + i);
             hall.addDoor(c, trialKey(loc, i + 1), 3, 9);
             hall.doorTint.put(c, SIN_THEMES[loc - 1].base);
@@ -485,7 +419,7 @@ public class GamePanel extends JPanel implements KeyListener {
         Room hall = rooms.get(hallKey(loc));
         hall.lockedDoors.clear();
         int next = loc == LOCS ? (done.contains("s" + LOCS) ? -1 : 3) : roomsDone(loc);
-        for (int i = 0; i < roomsIn(loc); i++) if (i != next) hall.lockedDoors.add((char) ('1' + i));
+        for (int i = 0; i < 4; i++) if (i != next) hall.lockedDoors.add((char) ('1' + i));
     }
 
     // ====== ГЕНЕРАЦИЯ ДОРОГИ ЛОВУШЕК ======
@@ -543,21 +477,19 @@ public class GamePanel extends JPanel implements KeyListener {
     // Комнаты 1-3 каждой локации: слева цель (свеча / предметы / тотемы), ворота 'G', дальше дорога ловушек к выходу.
     // В одной локации три комнаты всегда с тремя разными целями; глубже — больше ловушек.
     private Room trial(int loc, int n) {
-        if (loc > 2 && loc != 3 && loc != 4 && loc != 5 && n == fillerIndex(loc)) return fillerRoom(loc, n);   // в каждой локации одна комната — «пустышка» с одними ловушками
-        int cols = 56 + loc * 2;
+        if (n == fillerIndex(loc)) return fillerRoom(loc, n);   // в каждой локации одна комната — «пустышка» с одними ловушками
+        int cols = (loc == 1 && n == 2) ? 66 : 56 + loc * 2;    // музей Гнева длиннее: за воротами комната наказаний
         MapBuilder b = MapBuilder.side(cols);
         Random rnd = new Random(loc * 1000L + n * 17L);
         int kind = (loc + n) % 3;                              // 0 свеча, 1 сбор предметов, 2 тотемы, 3 встреча (вырваться)
-        if (loc <= 2) kind = 5;                                // Гнев (музей, наказания, семья) и Алчность (приют, печать): комнаты-загадки
-        if (loc == 3 && n <= 2) kind = 5;                      // Зависть: две загадки
-        if (loc == 4 && n == 1) kind = 5;                      // Похоть: комната с нарядами — загадка с платьем
-        if (loc == 4 && n == 2) kind = 3;                      // Похоть: Крис
-        if (loc == 5 && n <= 2) kind = 5;                      // Чревоугодие: две иллюзии — фуршет (еда тает) и столовая слуг (стул и гости — галлюцинация)
-        if (loc == 6) kind = n == 1 ? 5 : 6;                   // Лень: ванная — загадка, кровать — выбор «спать / не спать»
+        if (loc == 2 && n == 3) kind = 1;                      // приют: вместо тотемов — розы, работница уходит молча
+        if (loc == 4 && n == 1) kind = 1;                      // Похоть: комната с нарядами — розы вместо тотемов
+        if ((loc == 5 || loc == 6) && (n == 1 || n == 2)) kind = 4;           // Чревоугодие: фуршет и столовая — сценки без цели
+        if (loc == 4 && n == 3) kind = 3;                      // Похоть: Себастьян
         b.set(8, 9, '#');
         if (loc >= 2) pit(b, 27, 27);
         switch (kind) {
-            case 3, 4, 5, 6 -> { }                                     // комната-встреча / загадка: предметов-целей на карте нет
+            case 3, 4 -> { }                                        // комната-встреча: предметов нет, только сценка
             case 0 -> vaseLayout(b, loc);                           // много ваз: на полу и на полках
             case 1 -> {
                 char ch = loc % 2 == 1 && loc != 1 ? 'Z' : 'R';      // в первой локации — розы
@@ -578,14 +510,15 @@ public class GamePanel extends JPanel implements KeyListener {
             }
         }
         if (kind != 4) gate(b, 30);
-        List<int[]> plan = planRoad(33, cols - 5, loc, rnd);
+        List<int[]> plan = (loc == 1 && n == 2)
+                ? List.of(new int[]{T_HIDDEN, 42, 0}, new int[]{T_PIT, 46, 0}, new int[]{T_FLAME, 50, 40},
+                new int[]{T_SPIKE, 55, 0}, new int[]{T_HIDDEN, 59, 0})      // комната наказаний: ловушки вручную
+                : planRoad(33, cols - 5, loc, rnd);
         applyRoadMap(b, plan);
 
         Room r = new Room(SIN_NAMES[loc - 1] + " · комната " + n, b.build());
         r.sideView = true;
         r.theme = SIN_THEMES[loc - 1];
-        r.pxSin = PX_SINS[loc - 1];
-        r.pxRoom = pxRoomFor(loc, n);
         r.title = SIN_NAMES[loc - 1].toUpperCase();
         r.exitChar = '2';
         r.exitLocked = true;
@@ -595,95 +528,44 @@ public class GamePanel extends JPanel implements KeyListener {
                 r.goal = Room.Goal.NONE;
                 r.goalLabel = "";
                 r.exitLocked = false;
-                r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": " + (loc == 6
+                r.subtitle = "Комната " + n + " из 4: " + (loc == 6
                         ? (n == 1 ? "ванна, которой у неё не было месяцами" : "тёплая кровать с кошкой")
                         : "еда, которую ей не давали");
                 hint = "Подойди ближе. Здесь нет цели: поговори и иди к выходу";
             }
-            case 5 -> {
-                r.goal = Room.Goal.PUZZLE;
-                if (loc == 1) {                                     // Гнев: три загадки
-                    r.goalLabel = n == 1 ? "найди вазу Осмаров" : n == 2 ? "расставь предметы" : "расставь портреты";
-                    r.subtitle = n == 1 ? "Музей Осмаров: найди вазу с гербом семьи"
-                            : n == 2 ? "Комната наказаний: расставь предметы по порядку"
-                            : "Семья Осмаров: расставь портреты по иерархии";
-                    hint = n == 1 ? "Возьми вазу (E) и поставь на пьедестал с гербом Осмаров (E). Неверная ваза вернётся на место"
-                            : n == 2 ? "Выбирай предметы клавишей E в правильном порядке. Ошибёшься — всё начнётся заново"
-                            : "Ставь портреты (E) по порядку семьи. Ошибёшься — всё начнётся заново";
-                } else if (loc == 3) {                              // Зависть: две девочки и праздничный стол
-                    r.goalLabel = n == 1 ? "одень манекены" : "разложи вещи";
-                    r.subtitle = n == 1 ? "Комната 1 из 3: две девочки — одень манекены Эльзы и Анны"
-                            : "Комната 2 из 3: праздничный стол — что принадлежало Эльзе, а что Анне?";
-                    hint = n == 1 ? "Возьми платье с вешалки (E) и надень на манекен (E) так, как одеты девочки на семейном портрете"
-                            : "Возьми предмет со стола (E) и положи (E) на место того, кому он принадлежал — Эльзы или Анны";
-                } else if (loc == 5) {                              // Чревоугодие: фуршет и столовая слуг
-                    r.goalLabel = n == 1 ? "прикоснись к еде" : "развей иллюзию";
-                    r.subtitle = n == 1 ? "Комната 1 из 3: фуршет Осмаров — еда, которую ей не давали"
-                            : "Комната 2 из 3: столовая слуг — для Эльзы нет места";
-                    hint = n == 1 ? "Возьми блюда со стола (E). Присмотрись к ним — и к кошке: она тянется только к настоящему"
-                            : "Свободный стул — приманка? Иллюзии рассеиваются мечом (L). Кошка на плечах не обманется";
-                } else if (loc == 6) {                              // Лень: ванная
-                    r.goalLabel = "реши, что оставить";
-                    r.subtitle = "Комната 1 из 3: ванная — смыть прошлое или оставить?";
-                    hint = "Подойди к ванне. Потом: E у вещи — бросить в воду, E у ванны — отойти и оставить всё. Вода темнеет";
-                } else if (loc == 4) {                              // Похоть: гардеробная
-                    r.goalLabel = "подбери платье";
-                    r.subtitle = "Комната 1 из 3: старая гардеробная — подбери платье для манекена";
-                    hint = "Посмотри на старый семейный портрет и надень на манекен (E) такое же платье. Ошибёшься — платье останется висеть";
-                } else {
-                    r.goalLabel = n == 1 ? "раздай игрушки" : "найди подделку";
-                    r.subtitle = n == 1 ? "Детский приют «Дэкса»: игрушки для сирот" : "Работница приюта: документы с печатями";
-                    hint = n == 1 ? "Возьми игрушку со стола (E) и отдай тому ребёнку, чей рисунок на неё похож: E у кровати"
-                            : "На столах — документы с печатью Османов. Одна подделана: найди её и порви (E)";
-                }
-            }
-            case 6 -> {                                             // Лень, комната 2: кошка зовёт лечь
-                r.goal = Room.Goal.CHOICE;
-                r.goalLabel = "сделай выбор";
-                r.subtitle = "Комната 2 из 3: кровать с кошкой — лечь спать или идти дальше?";
-                r.choice = new Decision(Decision.Kind.BED, 20, 9,
-                        new Decision.Option("Лечь спать", false, "Эльза легла рядом с кошкой и закрыла глаза. Лень победила."),
-                        new Decision.Option("Не спать — идти дальше", true, "Эльза отвернулась от кровати. Кошка обиженно мяукнула."));
-                hint = "Кошка зовёт лечь. Чем дольше сопротивляешься, тем темнее экран. E — лечь, L — не спать";
-            }
             case 3 -> {
                 r.goal = Room.Goal.ESCAPE;
                 r.goalLabel = "вырвись";
-                r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": поговори и вырвись из его рук";
+                r.subtitle = "Комната " + n + " из 4: поговори и вырвись из его рук";
                 hint = "Подойди к нему. Когда он схватит — жми E или ПРОБЕЛ как можно быстрее!";
             }
             case 0 -> {
                 r.goal = Room.Goal.CANDLE;
                 r.goalLabel = "найди свечу";
                 r.checkTime = 60 + loc * 20;                        // чем глубже, тем дольше стоять над вазой
-                r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": найди свечу среди " + r.vases.size() + " ваз";
+                r.subtitle = "Комната " + n + " из 4: найди свечу среди " + r.vases.size() + " ваз";
                 hint = "Свеча в одной из " + r.vases.size() + " ваз. E — проверить (" + String.format("%.1f", r.checkTime / 60.0) + " с, стой смирно), L — разбить (штраф!)";
                 vaseGuards(r, loc);
             }
             case 1 -> {
                 r.goal = Room.Goal.COLLECT;
                 r.goalLabel = "собери предметы";
-                r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": собери все предметы";
+                r.subtitle = "Комната " + n + " из 4: собери все предметы";
                 hint = "Собери все светящиеся предметы — тогда откроются ворота";
             }
             default -> {
                 r.goal = Room.Goal.TOTEMS;
                 r.goalLabel = "разбей тотемы";
-                r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": разбей тотемы мечом";
+                r.subtitle = "Комната " + n + " из 4: разбей тотемы мечом";
                 hint = "Тотемы разбиваются мечом: L, три удара на каждый";
             }
         }
         r.addSign(11, hint);
-        if (loc == 1 && n == 1) {                              // первая комната игры: заодно короткое обучение
-            r.addSign(4, "A / D или стрелки — ходьба");
-            r.addSign(6, "ПРОБЕЛ — прыжок. Перепрыгни блок впереди");
-        }
         r.addDoor('1', hallKey(loc), DOOR_COL[n - 1], hallReturnRow(n));
         r.addDoor('2', hallKey(loc), DOOR_COL[n - 1], hallReturnRow(n));
         applyRoadTraps(r, plan);
         if (loc == 1) decorateWrath(r, n);
         else if (loc == 2) decorateGreed(r, n);
-        else if (loc == 3) decorateEnvy(r, n);
         else if (loc == 4) decorateLust(r, n);
         else if (loc == 5) decorateGluttony(r, n);
         else if (loc == 6) decorateSloth(r, n);
@@ -735,10 +617,8 @@ public class GamePanel extends JPanel implements KeyListener {
         Room r = new Room(SIN_NAMES[loc - 1] + " · комната " + n, b.build());
         r.sideView = true;
         r.theme = SIN_THEMES[loc - 1];
-        r.pxSin = PX_SINS[loc - 1];
-        r.pxRoom = pxRoomFor(loc, n);
         r.title = SIN_NAMES[loc - 1].toUpperCase();
-        r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": только ловушки — просто дойди до выхода";
+        r.subtitle = "Комната " + n + " из 4: только ловушки — просто дойди до выхода";
         r.goal = Room.Goal.NONE;
         r.exitChar = '2';
         r.exitLocked = false;
@@ -757,305 +637,114 @@ public class GamePanel extends JPanel implements KeyListener {
         return r;
     }
 
-    // перемешанный порядок 0..n-1; если shuffleAll == false, исходный порядок не допускается
-    private static int[] shuffled(int n, Random rnd, boolean allowSame) {
-        int[] a = new int[n];
-        do {
-            List<Integer> l = new ArrayList<>();
-            for (int i = 0; i < n; i++) l.add(i);
-            java.util.Collections.shuffle(l, rnd);
-            for (int i = 0; i < n; i++) a[i] = l.get(i);
-        } while (!allowSame && java.util.Arrays.equals(a, java.util.stream.IntStream.range(0, n).toArray()));
-        return a;
-    }
-
-    // Гнев (3 комнаты-загадки + грех): 1 — музей Осмаров (ваза с гербом), 2 — комната наказаний (ключ → цепь → плеть → дверь),
-    // 3 — семья Осмаров (портреты по иерархии, тайник). Реплика Эльзы запускается сама, когда она подходит.
+    // Декорации и реплики Эльзы в комнатах Гнева (локация 1). Реплика запускается сама, когда Эльза подходит к предмету.
     private void decorateWrath(Room r, int n) {
-        Random rnd = new Random();
-        if (n == 1) {                                          // музей: найди вазу с гербом Осмаров и поставь на нужный пьедестал
-            r.props.add(Prop.plaque(18, 3, "МУЗЕЙ ОСМАРОВ\nГерб рода — звезда о семи лучах"));
-            for (int c : new int[]{14, 20, 26}) r.props.add(new Prop(Prop.Kind.PAINTING, c, 6));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 10, 9, null,
-                    "Эльза|Эта ваза... Я помню её.",
-                    "Эльза|Они говорили, что она стоит дороже, чем жизнь некоторых людей.",
-                    "Эльза|Странно... тогда я ещё не понимала, насколько они были правы."));
-            int[] vaseCols = {12, 14, 16, 18};
-            int[] crests = shuffled(4, rnd, true);             // на четырёх вазах — четыре разных герба
-            for (int i = 0; i < 4; i++) {
-                Prop v = Prop.action(Prop.Kind.CREST_VASE, vaseCols[i], 9, "CREST_TAKE");
-                v.want = crests[i];
-                r.props.add(v);
-            }
-            int[] pedCols = {22, 25, 28};
-            int[] pedCrests = shuffled(3, rnd, true);          // на трёх пьедесталах — гербы 0..2, Осмары среди них
-            for (int i = 0; i < 3; i++) {
-                Prop ped = Prop.action(Prop.Kind.PEDESTAL, pedCols[i], 9, "PEDESTAL");
-                ped.want = pedCrests[i];
-                r.props.add(ped);
-            }
-            hidden(r, 20);                                     // ловушка между вазами и пьедесталами
-        } else if (n == 2) {                                   // комната наказаний
-            r.props.add(Prop.plaque(15, 3, "КОМНАТА НАКАЗАНИЙ"));
-            r.props.add(Prop.plaque(24, 3, "Сначала — то, что отпирает.\nЗатем — то, что удерживает.\nПотом — то, что учит.\nИ только тогда — выход."));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 10, 9, null,
-                    "Эльза|А это место я помню.",
-                    "Эльза|Странно... я ведь старалась забыть его.",
-                    "Эльза|Почему здесь всё выглядит так, будто меня ждали?"));
-            r.props.add(Prop.talk(Prop.Kind.WHIPS, 12, 9, null,
-                    "Эльза замечает плеть.",
-                    "Эльза|Мистер П.",
-                    "Эльза|Он всегда говорил, что боль делает людей послушными."));
-            r.props.add(new Prop(Prop.Kind.PILLORY, 27, 9));
-            int[] itemCols = {14, 17, 20, 23};
-            int[] order = shuffled(4, rnd, false);             // предметы стоят вперемешку
-            for (int i = 0; i < 4; i++) {
-                Prop it = Prop.action(Prop.Kind.WALL_ITEM, itemCols[i], 9, "SEQ");
-                it.want = order[i];                            // 0 ключ, 1 цепь, 2 плеть, 3 дверь — место в правильном порядке
-                r.props.add(it);
-            }
-        } else if (n == 3) {                                   // семья Осмаров
-            r.props.add(Prop.plaque(13, 3, "СЕМЬЯ ОСМАРОВ"));
-            r.props.add(Prop.plaque(20, 3, "Дом Осмаров держался на порядке:\nот старших — к младшим."));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 10, 9, null,
-                    "Эльза|Семья Осмаров...",
-                    "Эльза|Я когда-то думала, что они просто забрали мой дом.",
-                    "Эльза|Оказывается, они забрали гораздо больше."));
-            r.props.add(Prop.talk(Prop.Kind.FAMILY_PORTRAIT, 24, 5, null,
-                    "Эльза смотрит на Анну.",
-                    "Эльза|А её я помню лучше всех."));
-            int[] easelCols = {13, 15, 17, 19};
-            int[] who = shuffled(4, rnd, false);               // портреты стоят вперемешку: 0 отец, 1 мать, 2 старший сын, 3 Анна
-            for (int i = 0; i < 4; i++) {
-                Prop pt = Prop.action(Prop.Kind.PORTRAIT, easelCols[i], 9, "SEQ");
-                pt.want = who[i];
-                r.props.add(pt);
-            }
-            r.props.add(new Prop(Prop.Kind.STASH, 28, 9));
+        if (n == 2) {                                          // музей Осмаров, за воротами — комната наказаний
+            r.props.add(Prop.plaque(18, 3, "КОЛЛЕКЦИЯ СЕМИ ОСМАРОВ"));
+            for (int c : new int[]{10, 16, 19, 25}) r.props.add(new Prop(Prop.Kind.PAINTING, c, 6));
+            r.props.add(Prop.talk(Prop.Kind.PAINTING, 13, 6, null,
+                    "Эльза|Эта ваза из коллекции семи Осмаров, я их ненавижу..."));
+            hidden(r, 16, 22);                                 // пара ловушек на полу между вазами
+
+            r.props.add(Prop.plaque(35, 3, "КОМНАТА НАКАЗАНИЙ"));
+            r.props.add(Prop.talk(Prop.Kind.WHIPS, 36, 9, null,
+                    "Эльза|А это плеть и кнуты, которыми мистер П меня наказывал. Что оно тут делает?"));
+            r.props.add(new Prop(Prop.Kind.PILLORY, 39, 9));
+            r.props.add(new Prop(Prop.Kind.WHIPS, 53, 9));
+            r.props.add(new Prop(Prop.Kind.PILLORY, 57, 9));
+        } else if (n == 3) {                                   // комната семьи Осмаров
+            r.props.add(Prop.plaque(18, 3, "СЕМЬЯ ОСМАРОВ"));
+            for (int c : new int[]{11, 15, 21, 25}) r.props.add(new Prop(Prop.Kind.PAINTING, c, 6));
+            r.props.add(Prop.talk(Prop.Kind.FAMILY, 18, 9, null,
+                    "Эльза|Семья Осмаров... Ненавижу их. Особенно её — Анну."));
         }
     }
 
-    // Алчность (3 комнаты): 1 — детский приют (раздай игрушки детям), 2 — работница и поддельная печать,
-    // 3 (грех) — кабинет сотрудников с деньгами, она собрана в buildRooms().
+    // Алчность: детский приют «Дэкса». Комната 1 — игрушки и табличка, комната 2 — пустышка, комната 3 — молчаливая работница.
+    // Комната 4 (грех) — кабинет сотрудников с деньгами, она собрана в buildRooms().
     private void decorateGreed(Room r, int n) {
         if (n == 1) {
             r.props.add(Prop.plaque(21, 3, "ДЕТСКИЙ ПРИЮТ ДЛЯ СИРОТ «ДЭКСА»\nОткрыт для всех нуждающихся.\nДа будет вами доволен Бог."));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 15, 9, null,
-                    "Эльза|Открыто для всех нуждающихся...",
-                    "Эльза|Забавно.",
-                    "Эльза|Когда нуждалась я, никто почему-то не открыл дверь."));
-            r.props.add(Prop.action(Prop.Kind.TOY_TABLE, 12, 9, "TOY_TAKE"));
-            String[] kids = {"ТИМ", "МИЛА", "ЛЕВ"};
-            int[] wants = {1, 2, 0};                             // Тим — мишка, Мила — мячик, Лев — кубики
-            int[] cols = {17, 21, 25};
-            for (int i = 0; i < 3; i++) {
-                Prop kid = Prop.action(Prop.Kind.KID_BED, cols[i], 9, "KID");
-                kid.label = kids[i];
-                kid.want = wants[i];
-                r.props.add(kid);
-            }
-            Prop pouch = new Prop(Prop.Kind.POUCH, 14, 9);       // спрятан, пока загадка не решена
-            pouch.hidden = true;
-            r.props.add(pouch);
-        } else if (n == 2) {
-            r.props.add(Prop.talk(Prop.Kind.WORKER, 14, 9, "Работница молча вышла из комнаты.",
-                    "Эльза|Что вы здесь делаете?",
-                    "Тишина.",
-                    "Эльза|Вы ведь меня помните...",
-                    "Тишина.",
-                    "Эльза|Вас заставляли лгать обо мне.",
-                    "Тишина.",
-                    "Эльза|Вы меня предали.",
-                    "Тишина.",
-                    "Эльза|И всё ради чего?.. Денег?",
-                    "Тишина."));
-            r.props.add(Prop.plaque(22, 3, "ПЕЧАТЬ ОСМАНОВ\nНастоящая — с семью лучами."));
-            int forged = new Random().nextInt(3);                // какой из трёх документов поддельный — каждая игра по-новому
-            int[] cols = {19, 22, 25};
-            for (int i = 0; i < 3; i++) {
-                Prop doc = Prop.action(Prop.Kind.DOC, cols[i], 9, "DOC");
-                doc.forged = i == forged;
-                r.props.add(doc);
-            }
+            for (int c : new int[]{18, 20, 23, 25}) r.props.add(new Prop(Prop.Kind.TOYS, c, 9));
+        } else if (n == 3) {
+            for (int c : new int[]{16, 26}) r.props.add(new Prop(Prop.Kind.TOYS, c, 9));
+            // псевдодиалог: Эльза говорит, работница отвечает только молчанием и уходит
+            r.props.add(Prop.talk(Prop.Kind.WORKER, 21, 9, "Работница молча вышла из комнаты.",
+                    "Эльза|Что вы тут делаете?",
+                    "Работница|...",
+                    "Эльза|Вас же заставляли издеваться надо мной.",
+                    "Работница|...",
+                    "Эльза|Вы меня ждали. А потом предали.",
+                    "Работница|...",
+                    "Эльза|Вам не нужны деньги?",
+                    "Работница|...",
+                    "Эльза|Ответьте!",
+                    "Работница|..."));
         }
     }
 
-    // Зависть: комната 1 — две девочки (одень манекены Эльзы и Анны по портрету), комната 2 — праздничный стол
-    // (что принадлежало Эльзе, а что Анне), комната 3 (грех) — Анна и зеркало, она собрана в buildRooms().
-    private void decorateEnvy(Room r, int n) {
-        Random rnd = new Random();
-        if (n == 1) {
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 10, 9, null,
-                    "Эльза|Когда-то у нас было почти одинаковое детство.",
-                    "Эльза|Только почему-то её жизнь продолжилась... а моя закончилась."));
-            r.props.add(Prop.plaque(14, 3, "СТАРАЯ ОДЕЖДА ЭЛЬЗЫ"));
-            r.props.add(Prop.plaque(24, 3, "ПЛАТЬЯ АННЫ"));
-            int[] left = rnd.nextBoolean() ? new int[]{0, 1} : new int[]{1, 0};      // слева — старая одежда Эльзы
-            int[] right = rnd.nextBoolean() ? new int[]{2, 3} : new int[]{3, 2};     // справа — красивые платья Анны (среди них то самое)
-            int[] lc = {13, 15}, rc = {23, 25};
-            for (int i = 0; i < 2; i++) {
-                Prop a = Prop.action(Prop.Kind.GIRL_RACK, lc[i], 9, "GDRESS");
-                a.want = left[i];
-                r.props.add(a);
-                Prop b = Prop.action(Prop.Kind.GIRL_RACK, rc[i], 9, "GDRESS");
-                b.want = right[i];
-                r.props.add(b);
-            }
-            Prop me = Prop.action(Prop.Kind.GIRL_MANNEQUIN, 17, 9, "GMANN");
-            me.want = 0;
-            r.props.add(me);
-            r.props.add(new Prop(Prop.Kind.GIRLS_PORTRAIT, 19, 5));
-            Prop her = Prop.action(Prop.Kind.GIRL_MANNEQUIN, 21, 9, "GMANN");
-            her.want = 1;
-            r.props.add(her);
-        } else if (n == 2) {
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 10, 9, null,
-                    "Эльза|Я не хотела её ненавидеть.",
-                    "Эльза|Честно.",
-                    "Эльза|Я просто хотела хоть раз получить то, что получала она.",
-                    "Пауза.",
-                    "Эльза|Наверное... именно тогда всё и началось."));
-            r.props.add(Prop.plaque(16, 3, "ПРАЗДНИЧНЫЙ СТОЛ"));
-            Prop hint = Prop.plaque(19, 5, "Зависть начинается там, где чужое счастье\nкажется доказательством твоего несчастья.");
-            hint.hidden = true;                                // проступает, когда всё разложено верно
-            r.props.add(hint);
-            Prop pe = Prop.action(Prop.Kind.PLACE, 13, 9, "TPLACE");
-            pe.want = 0;
-            r.props.add(pe);
-            Prop pa = Prop.action(Prop.Kind.PLACE, 25, 9, "TPLACE");
-            pa.want = 1;
-            r.props.add(pa);
-            int[] order = shuffled(6, rnd, true);              // шесть предметов вперемешку: три Анны, три Эльзы
-            for (int i = 0; i < 6; i++) {
-                Prop it = Prop.action(Prop.Kind.TABLE_ITEM, 16 + i, 9, "TITEM");
-                it.want = order[i];
-                it.label = i == 0 ? "L" : i == 5 ? "R" : "";
-                r.props.add(it);
-            }
-        }
-    }
-
-    // Похоть: комната 1 — гардеробная (платье для манекена по семейному портрету), комната 2 — Крис (вырваться),
-    // комната 3 (грех) — Себастьян, она собрана в buildRooms().
+    // Похоть: комната 1 — вешалки с нарядами, комната 2 — пустышка, комната 3 — Себастьян (вырваться), комната 4 — Крис (в buildRooms()).
     private void decorateLust(Room r, int n) {
         if (n == 1) {
-            r.props.add(Prop.plaque(21, 3, "ГАРДЕРОБНАЯ"));
-            r.props.add(Prop.talk(Prop.Kind.CLOTHES, 12, 9, null,
-                    "Эльза|Мне говорили, что дворянка должна выглядеть красиво.",
-                    "Пауза.",
-                    "Эльза|Но я не выбирала, что надеть.",
-                    "Эльза смотрит на платье.",
-                    "Эльза|Некоторые вещи человек запоминает не потому, что они красивые."));
-            r.props.add(new Prop(Prop.Kind.CLOTHES, 26, 9));      // вешалки с дорогими платьями; среди них и слишком открытые
-            Prop portrait = new Prop(Prop.Kind.DRESS_PORTRAIT, 18, 5);
-            int target = new Random().nextInt(3);                  // платье на портрете — одно из трёх приличных
-            portrait.want = target;
-            r.props.add(portrait);
-            int[] order = shuffled(4, new Random(), true);         // платья стоят вперемешку: три обычных и одно слишком открытое
-            int[] cols = {14, 16, 20, 22};
-            for (int i = 0; i < 4; i++) {
-                Prop d = Prop.action(Prop.Kind.DRESS_OPTION, cols[i], 9, "DRESS");
-                d.want = order[i];
-                d.revealing = order[i] == Prop.REVEALING_DRESS;
-                r.props.add(d);
-            }
-            r.props.add(new Prop(Prop.Kind.MANNEQUIN, 24, 9));
-        } else if (n == 2) {
-            Prop chris = Prop.mash(Prop.Kind.CHRIS, 22, 9,
-                    "Эльза вырвалась и убежала от Криса. Похоть не взяла над ней верх.",
+            for (int c : new int[]{16, 25}) r.props.add(new Prop(Prop.Kind.CLOTHES, c, 9));
+            r.props.add(Prop.talk(Prop.Kind.CLOTHES, 20, 9, null,
+                    "Эльза|Именно в этих нарядах меня заставляли ходить перед господами и перед семьёй Осмаров.",
+                    "Эльза|Даже смотреть на них противно."));
+        } else if (n == 3) {
+            r.props.add(Prop.mash(Prop.Kind.SEBASTIAN, 22, 9,
+                    "Эльза вырвалась и убежала от Себастьяна.",
                     "Эльза не смогла вырваться. Она согрешила похотью.",
-                    "Из тени выходит Крис.",
-                    "Крис|Не бойся, Эльза. Тебе нечего бояться.",
-                    "Крис|Пойдём со мной. Я отведу тебя отсюда.",
-                    "Эльза|Я уже слышала эти слова.",
-                    "Эльза|«Не бойся».",
-                    "Эльза|«Я ничего тебе не сделаю».",
-                    "Эльза|«Доверься мне».",
-                    "Пауза.",
-                    "Эльза|Почему каждый раз после этих слов мне становилось только страшнее?");
-            chris.winLine = "На этот раз... я не останусь.";
-            chris.loseDark = true;                                 // при провале — тёмный экран и стон
-            r.props.add(chris);
+                    "Себастьян|Эльза... Я искал тебя.",
+                    "Эльза|Себастьян? Ты же помог мне сбежать...",
+                    "Себастьян|Помог. А теперь пойдём со мной. Уединимся ненадолго — никто не узнает.",
+                    "Эльза|Нет. Я не хочу. Отпусти меня!"));
         }
     }
 
-    // Чревоугодие: комната 1 — фуршет Осмаров (еда тает от прикосновения), комната 2 — столовая слуг (стол, гости и стул — иллюзия),
-    // комната 3 (грех) — мусорная с настоящей рыбой, она собрана в buildRooms().
-    // Кошка у Эльзы на плечах — индикатор реальности: она реагирует только на то, что существует на самом деле.
+    // Чревоугодие: комната 1 — фуршет Осмаров, комната 2 — столовая для слуг (в обеих еда — галлюцинации),
+    // комната 3 — пустышка с ловушками, комната 4 (грех) — отходы и рыба, она собрана в buildRooms().
     private void decorateGluttony(Room r, int n) {
         if (n == 1) {
             r.props.add(Prop.plaque(18, 3, "ФУРШЕТ СЕМЬИ ОСМАРОВ"));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 12, 9, null,            // невидимый запуск сценки
-                    "Огромный стол. Мясо, хлеб, фрукты, вино, десерты.",
-                    "Эльза|Я помню этот запах.",
-                    "Эльза|Странно... когда-то я ненавидела эти пиры.",
-                    "Пауза.",
-                    "Эльза|А теперь я готова съесть всё."));
-            r.props.add(new Prop(Prop.Kind.BUFFET, 14, 9));
-            for (int i = 0; i < 5; i++) {                                   // блюда лежат подряд, как один длинный стол
-                Prop dish = Prop.action(Prop.Kind.FEAST_DISH, 15 + i, 9, "FOOD");
-                dish.want = i;
-                if (i == 0) dish.catHint = "Кошка на плечах даже не повернула голову: настоящую еду она бы учуяла.";
-                r.props.add(dish);
-            }
-            r.props.add(new Prop(Prop.Kind.BUFFET, 20, 9));
+            for (int c : new int[]{15, 21}) r.props.add(new Prop(Prop.Kind.BUFFET, c, 9));
+            r.props.add(Prop.talk(Prop.Kind.BUFFET, 18, 9,
+                    "Еда растаяла, как дым. Это были лишь видения.",
+                    "Эльза|Фуршет семьи Осмаров... Столько еды. А мне они никогда не давали даже крошки.",
+                    "Эльза|Я так голодна... Может, хоть кусочек?",
+                    "Эльза|Нет... Еда тает в руках. Это галлюцинации. Съесть ничего нельзя."));
         } else if (n == 2) {
-            r.props.add(Prop.plaque(19, 3, "СТОЛОВАЯ СЛУГ"));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 10, 9, null,
-                    "Большой стол. На одном конце сидят господа, на другом — слуги. Но для Эльзы нет места.",
-                    "Эльза|Даже здесь мне не разрешали сидеть.",
-                    "Эльза|Забавно.",
-                    "Эльза|Я была хозяйкой этого дома... но для одного куска хлеба была ниже всех."));
-            int[][] guests = {{14, 0, 0}, {15, 2, 1}, {16, 0, 2}, {22, 1, 0}, {23, 1, 1}, {24, 1, 2}};   // {колонка, кто, очередь реплики}: господа слева, слуги справа
-            for (int[] gst : guests) {
-                Prop d = new Prop(Prop.Kind.DINER, gst[0], 9);
-                d.want = gst[1];
-                d.mask = gst[2];
-                if (gst[0] == 14) d.catHint = "Кошка на плечах даже не смотрит на гостей: ни запаха, ни тепла — их там нет.";
-                r.props.add(d);
-            }
-            Prop table = new Prop(Prop.Kind.HALL_TABLE, 13, 9);             // стол рисуется поверх гостей и закрывает им ноги
-            table.want = 13;
-            table.hp = ILLUSION_HITS;
-            r.props.add(table);
-            Prop chair = Prop.action(Prop.Kind.FREE_CHAIR, 19, 9, "SIT");   // единственное свободное место
-            chair.catHint = "Кошка прижала уши и не хочет смотреть на стул: он не настоящий.";
-            r.props.add(chair);
+            r.props.add(Prop.plaque(18, 3, "СТОЛОВАЯ ДЛЯ СЛУГ"));
+            for (int c : new int[]{14, 22}) r.props.add(new Prop(Prop.Kind.CANTEEN, c, 9));
+            r.props.add(Prop.talk(Prop.Kind.CANTEEN, 18, 9,
+                    "Похлёбка рассыпалась пылью. Это тоже были лишь видения.",
+                    "Эльза|Столовая для слуг. Даже сюда меня не пускали.",
+                    "Эльза|Слуги гнали меня от стола, смеялись и презирали. Говорили: «Тебе здесь не место».",
+                    "Эльза|Я протягиваю руку к миске, а она пуста. И это тоже галлюцинация."));
         }
     }
 
-    // Лень: комната 1 — ванная (попытка помыться, потом загадка «что бросить в воду, а что оставить»),
-    // комната 2 — кровать с кошкой (выбор «спать / не спать», экран темнеет), комната 3 (грех) — её бывшая комната, она собрана в buildRooms().
+    // Уныние: комната 1 — ванна (от горячей воды Эльзе становится плохо), комната 2 — кровать с кошкой (спать нельзя),
+    // комната 3 — пустышка с ловушками, комната 4 (грех) — её комната в том доме, она собрана в buildRooms().
     private void decorateSloth(Room r, int n) {
         if (n == 1) {
             r.props.add(Prop.plaque(18, 3, "ВАННАЯ КОМНАТА"));
             Prop bath = Prop.talk(Prop.Kind.BATH, 18, 9,
                     "Горячая вода оказалась слишком тяжёлой для ослабевшего тела.",
-                    "Старая ванна.",
-                    "Эльза|Я даже не помню, когда последний раз принимала ванну.",
-                    "Она подходит к воде.",
-                    "Эльза|Я хочу просто смыть всё.",
-                    "Эльза пытается принять ванну. Экран начинает искажаться.",
-                    "Эльзе становится плохо.",
-                    "Эльза|Нет...",
-                    "Эльза|Это не смывается.");
+                    "Эльза|Ванна... Настоящая, с тёплой водой. Я не мылась столько месяцев.",
+                    "Эльза|Я только окунусь на минутку...",
+                    "Эльза|Ох... Голова кружится, перед глазами темнеет. Мне плохо...");
             bath.effect = "SICK";
             r.props.add(bath);
-            int[] itemCols = {11, 13, 23, 25};                  // вещи из её прошлого: фотография, ленточка, письмо, башмак
-            for (int i = 0; i < itemCols.length; i++) {
-                Prop it = Prop.action(Prop.Kind.BATH_ITEM, itemCols[i], 9, "BITEM");
-                it.want = i;
-                r.props.add(it);
-            }
         } else if (n == 2) {
-            r.props.add(Prop.plaque(18, 3, "СПАЛЬНЯ"));
-            r.props.add(Prop.talk(Prop.Kind.PLAQUE, 14, 9, null,
-                    "Кошка лежит на кровати. Она выглядит очень спокойно.",
-                    "Эльза|Ты хочешь, чтобы я легла?",
-                    "Кошка смотрит на неё.",
-                    "Эльза|Наверное, ты права.",
-                    "Пауза.",
-                    "Эльза|Можно ведь просто закрыть глаза."));
+            r.props.add(Prop.plaque(20, 3, "СПАЛЬНЯ"));
+            Prop bed = Prop.talk(Prop.Kind.BED, 20, 9,
+                    "Эльза отвернулась от кровати. Кошка обиженно мяукнула.",
+                    "Кошка|Мяу... Мур-мур. (кошка свернулась на подушке и зовёт Эльзу лечь рядом)",
+                    "Эльза|Кошка, ты залезла на кровать? Хочешь, чтобы я поспала?",
+                    "Эльза|Так тепло... Так хочется закрыть глаза хоть на минуту.",
+                    "Эльза|Нет. Если усну — не встану. Нужно идти дальше.");
+            bed.effect = "SLEEPY";
+            r.props.add(bed);
         }
     }
 
@@ -1067,7 +756,6 @@ public class GamePanel extends JPanel implements KeyListener {
                 player.hp = Math.max(1, player.hp - 2);
                 poisonTimer = Math.max(poisonTimer, 300);
                 slowTimer = 300;
-                distortTimer = 300;                              // экран плывёт
                 return "Эльзе плохо: минус сердца, яд и замедление";
             case "SLEEPY":
                 slowTimer = 300;
@@ -1346,426 +1034,6 @@ public class GamePanel extends JPanel implements KeyListener {
         if (prefix != null) showMessage(prefix + " " + open);
     }
 
-    // ====== ЗАГАДКИ АЛЧНОСТИ ======
-    // короткая сценка из нескольких реплик (без привязки к предмету в комнате)
-    private void say(String endText, String... lines) {
-        startDialog(Prop.talk(Prop.Kind.PLAQUE, 0, 0, endText, lines));
-    }
-
-    // ближайший предмет, с которым можно взаимодействовать клавишей E
-    private Prop nearAction() {
-        if (current == null || dialog != null || mashProp != null) return null;
-        Prop best = null;
-        double bd = 64;
-        for (Prop p : current.props) {
-            if (p.action == null || p.solved || p.hidden) continue;
-            double dx = Math.abs(p.centerX() - player.centerX());
-            if (dx < bd && Math.abs(p.centerY() - player.centerY()) < 90) { bd = dx; best = p; }
-        }
-        return best;
-    }
-
-    private String actionPrompt(Prop p) {
-        return switch (p.action) {
-            case "TOY_TAKE" -> carryToy < 0 ? "E — взять игрушку" : "E — взять другую игрушку";
-            case "KID" -> carryToy < 0 ? "Сначала возьми игрушку со стола" : "E — отдать " + Prop.TOY_NAMES[carryToy];
-            case "DOC" -> "E — порвать документ";
-            case "FOOD" -> "E — взять: " + Prop.FOOD_NAMES[p.want % 5];
-            case "SIT" -> "E — сесть на свободное место";
-            case "GDRESS" -> carryGDress < 0 ? "E — взять: " + Prop.GDRESS_NAMES[p.want] : "E — взять другое платье";
-            case "GMANN" -> carryGDress < 0 ? "Сначала возьми платье с вешалки" : "E — надеть на манекен: " + (p.want == 0 ? "ЭЛЬЗА" : "АННА");
-            case "TITEM" -> "E — взять: " + Prop.TITEM_NAMES[p.want];
-            case "TPLACE" -> carryTItem < 0 ? "Сначала возьми предмет со стола" : "E — положить на место " + (p.want == 0 ? "Эльзы" : "Анны");
-            case "MIRROR" -> "E — посмотреть в зеркало";
-            case "DRESS" -> p.revealing ? "E — осмотреть платье" : "E — надеть на манекен: " + Prop.DRESS_NAMES[p.want] + " платье";
-            case "CREST_TAKE" -> carryCrest < 0 ? "E — взять вазу" : "E — взять другую вазу";
-            case "PEDESTAL" -> carryCrest < 0 ? "Сначала возьми вазу" : "E — поставить вазу";
-            case "SEQ" -> p.kind == Prop.Kind.PORTRAIT ? "E — поставить портрет: " + Prop.FAMILY_NAMES[p.want]
-                    : "E — выбрать: " + Prop.ITEM_NAMES[p.want];
-            case "BITEM" -> "E — бросить в воду: " + Prop.BITEM_NAMES[Math.floorMod(p.want, 4)];
-            case "BLEAVE" -> "E — отойти от воды и оставить всё как есть";
-            case "HMARK" -> "E — прочитать метку";
-            default -> "E";
-        };
-    }
-
-    private void doAction(Prop p) {
-        switch (p.action) {
-            case "TOY_TAKE" -> {
-                if (carryToy >= 0) p.toyMask |= 1 << carryToy;           // прежнюю игрушку кладём обратно
-                int next = -1;
-                for (int k = 1; k <= 3 && next < 0; k++) {
-                    int t = ((carryToy < 0 ? -1 : carryToy) + k + 3) % 3;
-                    if ((p.toyMask >> t & 1) != 0) next = t;
-                }
-                if (next < 0) { showMessage("На столе больше нет игрушек"); return; }
-                p.toyMask &= ~(1 << next);
-                carryToy = next;
-                showMessage("В руках: " + Prop.TOY_NAMES[next] + ". Посмотри на рисунки над кроватями");
-            }
-            case "KID" -> {
-                if (carryToy < 0) { showMessage("Сначала возьми игрушку со стола (E)"); return; }
-                if (carryToy != p.want) {
-                    showMessage(p.label + " хотел(а) не это. Посмотри на рисунок над кроватью");
-                    return;
-                }
-                p.solved = true;
-                showMessage(p.label + " получил(а) " + Prop.TOY_NAMES[carryToy] + " и улыбнулся(ась)");
-                carryToy = -1;
-                int left = 0;
-                for (Prop q : current.props) if ("KID".equals(q.action) && !q.solved) left++;
-                if (left == 0) toysDone();
-            }
-            case "FOOD" -> {
-                p.solved = true;                                         // блюдо тает от прикосновения
-                int gone = 0, total = 0;
-                for (Prop q : current.props) if ("FOOD".equals(q.action)) { total++; if (q.solved) gone++; }
-                if (gone >= total) foodDone();
-                else showMessage(gone == 1 ? "Эльза коснулась блюда — оно растаяло, как дым. Осталось: " + (total - gone)
-                        : "Блюдо растаяло. Осталось: " + (total - gone));
-            }
-            case "SIT" -> {                                              // сесть на свободный стул нельзя: он тоже галлюцинация
-                p.solved = true;
-                player.hp = Math.max(1, player.hp - 1);
-                player.invul = Math.max(player.invul, 40);
-                slowTimer = Math.max(slowTimer, 480);
-                weakTimer = Math.max(weakTimer, 480);
-                showMessage("Эльза села — и упала на пол: стул растаял, он тоже был видением.\nПадение: минус сердце, замедление и слабость. Иллюзия всё ещё стоит — развей её мечом");
-            }
-            case "CREST_TAKE" -> {
-                carryCrest = p.want;
-                showMessage("В руках ваза с гербом. Найди пьедестал с гербом Осмаров");
-            }
-            case "PEDESTAL" -> {
-                if (carryCrest < 0) { showMessage("Сначала возьми вазу (E)"); return; }
-                if (carryCrest != p.want) {
-                    carryCrest = -1;
-                    showMessage("Герб на вазе не совпадает с гербом пьедестала. Ваза возвращена на место");
-                    return;
-                }
-                if (p.want != Prop.OSMAR_CREST) {
-                    carryCrest = -1;
-                    showMessage("Это герб другого рода, не Осмаров. Ваза возвращена на место");
-                    return;
-                }
-                p.solved = true;
-                p.placed = carryCrest;
-                carryCrest = -1;
-                unlockExit("Ваза Осмаров встала на свой пьедестал.");
-            }
-            case "SEQ" -> {
-                int progress = 0, total = 0;
-                for (Prop q : current.props) if ("SEQ".equals(q.action)) { total++; if (q.solved) progress++; }
-                if (p.want != progress) {                                // ошибка: всё возвращается на места
-                    for (Prop q : current.props) if ("SEQ".equals(q.action)) { q.solved = false; q.placed = -1; }
-                    showMessage("Неверный порядок. Всё вернулось на свои места");
-                    return;
-                }
-                p.solved = true;
-                p.placed = ++progress;
-                if (progress < total) showMessage("Верно (" + progress + "/" + total + ")");
-                else seqDone(p);
-            }
-            case "GDRESS" -> {
-                if (carryGDress >= 0) { Prop prev = findProp("GDRESS", carryGDress); if (prev != null) prev.solved = false; }
-                p.solved = true;                                         // платье снято с вешалки
-                carryGDress = p.want;
-                showMessage("В руках: " + Prop.GDRESS_NAMES[p.want] + ". Посмотри на семейный портрет");
-            }
-            case "GMANN" -> {
-                if (carryGDress < 0) { showMessage("Сначала возьми платье с вешалки (E)"); return; }
-                int target = p.want == 0 ? Prop.GIRL_ELSA_DRESS : Prop.GIRL_ANNA_DRESS;
-                if (carryGDress != target) {
-                    Prop prev = findProp("GDRESS", carryGDress);
-                    if (prev != null) prev.solved = false;
-                    carryGDress = -1;
-                    showMessage("На портрете " + (p.want == 0 ? "Эльза" : "Анна") + " одета не так. Платье вернулось на вешалку");
-                    return;
-                }
-                p.solved = true;
-                p.placed = carryGDress;
-                carryGDress = -1;
-                boolean all = true;
-                for (Prop q : current.props) if ("GMANN".equals(q.action) && !q.solved) all = false;
-                if (all) girlsDone();
-                else showMessage("Платье сидит как на портрете (1/2)");
-            }
-            case "TITEM" -> {
-                if (carryTItem >= 0) { Prop prev = findProp("TITEM", carryTItem); if (prev != null) prev.solved = false; }
-                p.solved = true;                                         // предмет взят со стола
-                carryTItem = p.want;
-                showMessage("В руках: " + Prop.TITEM_NAMES[p.want] + ". Чьё это — Эльзы или Анны?");
-            }
-            case "TPLACE" -> {
-                if (carryTItem < 0) { showMessage("Сначала возьми предмет со стола (E)"); return; }
-                int owner = carryTItem < 3 ? 1 : 0;                      // 0..2 — вещи Анны, 3..5 — вещи Эльзы
-                if (owner != p.want) {
-                    Prop prev = findProp("TITEM", carryTItem);
-                    if (prev != null) prev.solved = false;
-                    carryTItem = -1;
-                    showMessage(p.want == 0 ? "Это принадлежало не Эльзе. Предмет вернулся на стол"
-                            : "Это принадлежало не Анне. Предмет вернулся на стол");
-                    return;
-                }
-                p.mask |= 1 << carryTItem;
-                carryTItem = -1;
-                int placed = 0;
-                for (Prop q : current.props) if ("TPLACE".equals(q.action)) placed += Integer.bitCount(q.mask);
-                if (placed >= 6) tableDone();
-                else showMessage("Верно (" + placed + "/6)");
-            }
-            case "MIRROR" -> startInput(p);
-            case "DRESS" -> {
-                if (p.revealing) {                                       // слишком открытый наряд — Эльза его не возьмёт
-                    say("", "Эльза|Нет. Это не моё.");
-                    return;
-                }
-                Prop mannequin = null, portrait = null;
-                for (Prop q : current.props) {
-                    if (q.kind == Prop.Kind.MANNEQUIN) mannequin = q;
-                    if (q.kind == Prop.Kind.DRESS_PORTRAIT) portrait = q;
-                }
-                if (mannequin == null || portrait == null) return;
-                if (p.want != portrait.want) {
-                    showMessage("Это не то платье. Сверься с семейным портретом на стене");
-                    return;
-                }
-                p.solved = true;                                         // платье переехало на манекен
-                mannequin.solved = true;
-                mannequin.placed = p.want;
-                unlockExit("Платье совпало с портретом.");
-            }
-            case "DOC" -> {
-                if (!p.forged) {
-                    showMessage("Печать настоящая: семь лучей. Рвать этот документ нельзя");
-                    return;
-                }
-                p.solved = true;
-                unlockExit("Подделка порвана!");
-                say("", "Эльза|Значит, всё-таки деньги.");
-            }
-            case "BITEM" -> bathThrow(p);
-            case "BLEAVE" -> bathLeave();
-            case "HMARK" -> readMark(p);
-            default -> { }
-        }
-    }
-
-    // ====== ЗАГАДКИ ЛЕНИ ======
-    private Prop findKind(Prop.Kind k) {
-        for (Prop q : current.props) if (q.kind == k) return q;
-        return null;
-    }
-
-    private int thrownCount() {
-        int n = 0;
-        for (Prop q : current.props) if (q.kind == Prop.Kind.BATH_ITEM && q.solved) n++;
-        return n;
-    }
-
-    // бросить вещь в воду: вода темнеет; когда она почти чёрная, всё брошенное всплывает обратно
-    private void bathThrow(Prop p) {
-        Prop bath = findKind(Prop.Kind.BATH);
-        if (bath == null || !bath.done) { showMessage("Сначала подойди к ванне"); return; }
-        p.solved = true;
-        bath.placed = Math.max(0, bath.placed) + 1;
-        int thrown = thrownCount();
-        if (thrown >= 3) { bathDone(true); return; }
-        showMessage("В воду упало: " + Prop.BITEM_NAMES[Math.floorMod(p.want, 4)] + ". " + (thrown == 1 ? "Вода чуть потемнела" : "Вода мутнеет"));
-    }
-
-    // отойти от ванны: если что-то уже бросили — вода останется тёмной, брошенное всплывёт
-    private void bathLeave() {
-        bathDone(thrownCount() > 0);
-    }
-
-    private void bathDone(boolean returned) {
-        Prop bath = findKind(Prop.Kind.BATH);
-        if (bath != null) {
-            bath.action = null;
-            if (returned) bath.placed = 4;
-        }
-        for (Prop q : current.props) {
-            if (q.kind != Prop.Kind.BATH_ITEM) continue;
-            q.action = null;
-            if (returned) q.solved = false;                     // всё, что бросили, всплыло обратно
-        }
-        unlockExit(returned ? "Вода почернела." : "Эльза отошла от воды.");
-        if (returned) {
-            say("", "Вода почти чёрная. Всё, что Эльза бросила, всплыло обратно.",
-                    "Эльза|Это не смывается.",
-                    "Эльза|Прошлое нельзя просто смыть. Оно только темнеет, пока я делаю вид, что его нет.");
-        } else {
-            say("", "Эльза|Нет. Я оставлю всё как есть.", "Эльза|Это тоже я.");
-        }
-    }
-
-    // метки роста читаются снизу вверх; ошибёшься — всё сначала
-    private boolean marksPending() {
-        for (Prop q : current.props) if (q.kind == Prop.Kind.HEIGHT_MARK && !q.solved) return true;
-        return false;
-    }
-
-    private void readMark(Prop p) {
-        int expect = 0;
-        for (Prop q : current.props) if (q.kind == Prop.Kind.HEIGHT_MARK && q.solved) expect++;
-        if (p.want != expect) {
-            for (Prop q : current.props) if (q.kind == Prop.Kind.HEIGHT_MARK) q.solved = false;
-            showMessage("Эльза росла снизу вверх: читай метки по порядку, начиная с самой низкой");
-            return;
-        }
-        p.solved = true;
-        int total = Prop.HMARK_AGES.length;
-        if (expect + 1 < total) {
-            showMessage("Метка: " + Prop.HMARK_AGES[p.want] + " ЛЕТ (" + (expect + 1) + "/" + total + ")");
-            return;
-        }
-        say("Все метки прочитаны. Теперь можно сделать выбор",
-                "Последняя отметка: 16 ЛЕТ.",
-                "Эльза|Шестнадцать.",
-                "Эльза|Дальше на стене пусто. Меня здесь больше никто не измерял.");
-    }
-
-    private Prop findProp(String action, int want) {
-        for (Prop q : current.props) if (action.equals(q.action) && q.want == want) return q;
-        return null;
-    }
-
-    // оба манекена одеты как на портрете: видно, что платье Эльзы теперь на манекене Анны
-    private void girlsDone() {
-        for (Prop q : current.props) if ("GMANN".equals(q.action) && q.want == 1) q.reveal = true;
-        unlockExit("Манекены одеты как на портрете.");
-        say("", "Эльза|Подожди...",
-                "Эльза|На подоле вышита буква. «Э».",
-                "Эльза|Это моё платье. Я носила его, а теперь оно на ней.",
-                "Эльза|Всё, что было моим, как-то оказывалось её.");
-    }
-
-    // всё разложено верно: на стене проступает надпись
-    private void tableDone() {
-        for (Prop q : current.props) if (q.kind == Prop.Kind.PLAQUE && q.hidden) q.hidden = false;
-        unlockExit("Всё лежит на своих местах.");
-        say("", "На стене проступила надпись:",
-                "Зависть начинается там, где чужое счастье кажется доказательством твоего несчастья.");
-    }
-
-    // ====== ЗЕРКАЛО АННЫ: окно ввода ======
-    private void startInput(Prop mirror) {
-        inputProp = mirror;
-        inputBuf.setLength(0);
-        inputMsg = "";
-        up = down = left = right = jump = false;
-        player.moving = false;
-        checkTimer = 0;
-        checkVase = null;
-    }
-
-    private void submitInput() {
-        String t = inputBuf.toString().trim().toLowerCase();
-        if (t.contains("ненавиж")) resolveMirror(false);
-        else if (t.contains("прощ")) resolveMirror(true);
-        else inputMsg = "Слова не находятся. Напиши «ненавижу» или «прощаю»";
-    }
-
-    // ответ зеркалу — это и есть выбор комнаты-греха (s3): «прощаю» — добрый поступок, «ненавижу» — плохой
-    private void resolveMirror(boolean good) {
-        Prop m = inputProp;
-        inputProp = null;
-        m.solved = true;
-        m.action = null;
-        m.placed = good ? 1 : 2;
-        sinDeed(good);
-        String effect;
-        if (good) {
-            player.hp = player.maxHp;
-            effect = "Чистая совесть: сердца восстановлены";
-        } else {
-            effect = applyCurse();
-        }
-        unlockExit(null);
-        showMessage((good ? "Эльза простила Анну. Зависть отступила." : "Эльза выбрала ненависть. Зависть победила.") + "\n" + effect);
-    }
-
-    private void drawInput(Graphics2D g) {
-        g.setColor(new Color(0, 0, 0, 200));
-        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
-        int cy = Room.VIEW_H / 2;
-        g.setFont(new Font("Monospaced", Font.BOLD, 28));
-        g.setColor(new Color(200, 235, 210));
-        drawCentered(g, "В зеркале — Анна.", cy - 70);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 18));
-        g.setColor(Color.WHITE);
-        drawCentered(g, "Что ты чувствуешь к ней? Напиши ответ:", cy - 36);
-
-        int w = 460, h = 44, x = (Room.VIEW_W - w) / 2, y = cy - 16;
-        g.setColor(new Color(20, 28, 24));
-        g.fillRect(x, y, w, h);
-        g.setColor(current.theme.accent);
-        g.drawRect(x, y, w, h);
-        g.setFont(new Font("Monospaced", Font.BOLD, 24));
-        String shown = inputBuf.toString() + ((tick / 30) % 2 == 0 ? "_" : "");
-        g.setColor(Color.WHITE);
-        g.drawString(shown, x + 12, y + 31);
-
-        g.setFont(new Font("Monospaced", Font.PLAIN, 16));
-        if (!inputMsg.isEmpty()) {
-            g.setColor(new Color(255, 120, 120));
-            drawCentered(g, inputMsg, y + h + 30);
-        }
-        g.setColor(new Color(170, 190, 180));
-        drawCentered(g, "ненавижу   /   прощаю", y + h + 58);
-        drawCentered(g, "Enter — ответить   ·   Esc — отойти от зеркала", y + h + 82);
-    }
-
-    // цепочка собрана: комната наказаний — открывается проход; семья Осмаров — открывается тайник и проступает надпись
-    private void seqDone(Prop last) {
-        if (last.kind == Prop.Kind.PORTRAIT) {
-            for (Prop q : current.props) {
-                if (q.kind == Prop.Kind.PORTRAIT && q.want == 3) q.reveal = true;
-                if (q.kind == Prop.Kind.STASH) q.solved = true;
-            }
-            unlockExit("Тайник открыт.");
-            say("", "На портрете Анны проступила надпись:", "«Она получила всё.»");
-        } else {
-            unlockExit("Предметы расставлены верно. Проход открыт.");
-        }
-    }
-
-    // весь фуршет растаял: Эльза понимает, что еда была ненастоящей
-    private void foodDone() {
-        unlockExit("Весь фуршет растаял.");
-        say("", "Эльза|Я знала.", "Эльза|Я просто очень хотела поверить, что это настоящее.");
-    }
-
-    // удар мечом по иллюзии столовой: стол, гости и стул рассеиваются после ILLUSION_HITS ударов
-    private void hitIllusion() {
-        Prop table = null;
-        boolean touched = false;
-        Rectangle hit = swordHit();
-        for (Prop q : current.props) {
-            if (!q.isIllusion() || q.solved) continue;
-            if (q.kind == Prop.Kind.HALL_TABLE) table = q;
-            if (hit.intersects(q.box())) touched = true;
-        }
-        if (table == null || !touched) return;
-        table.hp--;
-        table.flash = 10;
-        if (table.hp > 0) {
-            showMessage("Иллюзия дрожит... (" + (ILLUSION_HITS - table.hp) + "/" + ILLUSION_HITS + ")");
-            return;
-        }
-        for (Prop q : current.props) if (q.isIllusion()) q.solved = true;
-        unlockExit("Иллюзия рассеялась: ни стола, ни голосов — только пустая комната.");
-    }
-
-    // все игрушки розданы: находится спрятанный мешочек с монетами
-    private void toysDone() {
-        for (Prop q : current.props) if (q.kind == Prop.Kind.POUCH) q.hidden = false;
-        inventory.add(new Item(Item.Type.COIN, "Мешочек монет", "Спрятан в приюте под столом"));
-        unlockExit("Все игрушки розданы. Под столом нашёлся спрятанный мешочек с монетами!");
-        say("", "Эльза|Им было что отдавать.", "Эльза|Только не мне.");
-    }
-
     // ====== ДИАЛОГИ ======
     private void checkProps() {
         for (Prop p : current.props) {
@@ -1773,20 +1041,6 @@ public class GamePanel extends JPanel implements KeyListener {
             boolean near = Math.abs(p.centerX() - player.centerX()) < 90
                     && (current.sideView || Math.abs(p.centerY() - player.centerY()) < 90);
             if (near) { startDialog(p); return; }
-        }
-    }
-
-    // Кошка — индикатор реальности: у Эльзы на плечах она реагирует только на то, что существует.
-    // Подходишь к иллюзии — кошка равнодушна или прижимает уши; к настоящему — оживляется. Подсказка показывается один раз.
-    private void checkCatHints() {
-        if (messageTimer > 0 || dialog != null || mashProp != null) return;
-        for (Prop p : current.props) {
-            if (p.catHint == null || p.hinted || p.solved) continue;
-            if (Math.abs(p.centerX() - player.centerX()) < 120) {
-                p.hinted = true;
-                showMessage(p.catHint);
-                return;
-            }
         }
     }
 
@@ -1826,18 +1080,11 @@ public class GamePanel extends JPanel implements KeyListener {
         dialog = null;
         dialogProp = null;
         if (p == null) return;
-        if (p.input) {                                       // зеркало: после сценки — окно ввода (потом E у зеркала откроет его снова)
-            p.done = true;
-            p.action = "MIRROR";
-            startInput(p);
-            return;
-        }
         if (p.mash) {                                        // после сценки — «вырвись»; done выставит finishMash
             startMash(p);
             return;
         }
         p.done = true;
-        if (p.kind == Prop.Kind.BATH) p.action = "BLEAVE";   // после сцены: E — отойти от воды
         String txt = p.endText == null ? "" : p.endText;
         String eff = propEffect(p);
         if (!eff.isEmpty()) txt = txt.isEmpty() ? eff : txt + "\n" + eff;
@@ -1874,12 +1121,6 @@ public class GamePanel extends JPanel implements KeyListener {
         mashProp = null;
         mashDown.clear();
         p.done = true;                                       // персонаж уходит (исчезает)
-        if (p.alwaysOpen) {                                  // Себастьян: дверь открывается в любом случае, без греха и проклятия
-            if (win) player.hp = player.maxHp;
-            unlockExit(null);
-            say(p.winText, "Эльза|" + p.winLine);
-            return;
-        }
         String effect;
         if (win) {
             player.hp = player.maxHp;
@@ -1889,12 +1130,9 @@ public class GamePanel extends JPanel implements KeyListener {
             String sinKey = id == null ? current.key : "s" + id[0];
             if (sins.bad(sinKey)) System.out.println("Плохих поступков: " + sins.badCount());
             effect = applyCurse();
-            if (p.loseDark) blackTimer = 80;                 // тёмный экран на секунду и стон
         }
         unlockExit(null);
-        String msg = (win ? p.winText : p.loseText) + "\n" + effect;
-        if (win && p.winLine != null) say(msg, "Эльза|" + p.winLine);
-        else showMessage(msg);
+        showMessage((win ? p.winText : p.loseText) + "\n" + effect);
     }
 
     private void drawMash(Graphics2D g) {
@@ -1906,10 +1144,10 @@ public class GamePanel extends JPanel implements KeyListener {
 
         g.setFont(new Font("Monospaced", Font.BOLD, 34));
         g.setColor(new Color(255, 90, 90));
-        drawCentered(g, mashProp.mashTitle != null ? mashProp.mashTitle : "ВЫРВИСЬ!", top + 50);
+        drawCentered(g, "ВЫРВИСЬ!", top + 50);
         g.setFont(new Font("Monospaced", Font.BOLD, 18));
         g.setColor(Color.WHITE);
-        drawCentered(g, mashProp.mashHint != null ? mashProp.mashHint : "Жми E или ПРОБЕЛ как можно быстрее — не дай себя удержать", top + 78);
+        drawCentered(g, "Жми E или ПРОБЕЛ как можно быстрее — не дай себя удержать", top + 78);
 
         int w = 560, h = 26, x = (Room.VIEW_W - w) / 2, y = top + 98;
         double pr = Math.max(0, Math.min(1, mashProgress));
@@ -2058,15 +1296,7 @@ public class GamePanel extends JPanel implements KeyListener {
         buildRooms();
         for (int loc = 1; loc <= LOCS; loc++) refreshHallLocks(loc);
         pet = null;
-        catIntro.clear();
-        carryToy = -1;
-        carryCrest = -1;
-        carryGDress = carryTItem = -1;
-        inputProp = null;
         slowTimer = poisonTimer = darkTimer = weakTimer = 0;
-        distortTimer = 0;
-        sleepDark = 0;
-        blackTimer = 0;
         slowPermanent = false;
         checkTimer = 0;
         checkVase = null;
@@ -2074,7 +1304,6 @@ public class GamePanel extends JPanel implements KeyListener {
         dialogProp = null;
         mashProp = null;
         mashDown.clear();
-        inputProp = null;
         won = false;
         victoryTimer = 0;
         epilogue = null;
@@ -2111,7 +1340,6 @@ public class GamePanel extends JPanel implements KeyListener {
         dialogProp = null;
         mashProp = null;
         mashDown.clear();
-        inputProp = null;
         up = down = left = right = jump = false;
         invOpen = false;
     }
@@ -2135,24 +1363,7 @@ public class GamePanel extends JPanel implements KeyListener {
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d").matcher(k);
         return (m.find() ? "Локация " + m.group() + " · " : "") + current.name;
     }
-    // Лень, комната 2: чем дольше Эльза стоит у кровати и не ложится, тем темнее экран
-    private void updateSleep() {
-        Decision d = current.choice;
-        if ("r6_2".equals(current.key) && d != null && !d.decided) {
-            double dist = Math.hypot(d.centerX() - player.centerX(), d.centerY() - player.centerY());
-            if (dist < 320) sleepDark = Math.min(0.88, sleepDark + 0.0007);
-            else sleepDark = Math.max(0, sleepDark - 0.002);
-            if (!sleepThought && sleepDark > 0.3) {
-                sleepThought = true;
-                say("", "Эльза|Если я усну... мне больше ничего не придётся делать.");
-            }
-        } else if (sleepDark > 0) {
-            sleepDark = Math.max(0, sleepDark - 0.02);
-        }
-    }
-
     private void enterRoom(Room r) {
-        sleepThought = false;
         current = r;
         titleTimer = r.title != null ? 170 : 0;
         if (r.choice != null) r.choice.showCat = pet == null;     // кошка на плечах — вторую у рыбы не рисуем
@@ -2177,20 +1388,16 @@ public class GamePanel extends JPanel implements KeyListener {
             epilogue = new EndingCutscene(ending);
             return;
         }
-        if (blackTimer > 0) { if (--blackTimer == 0) blackText = "…ах…"; return; }            // тёмный экран: мир стоит
         if (messageTimer > 0) messageTimer--;
         if (titleTimer > 0) titleTimer--;
         if (invOpen || won) return;                              // в инвентаре мир стоит
         if (dialog != null) { dialogT++; return; }               // во время реплики мир тоже стоит
-        if (inputProp != null) return;                           // и пока открыто окно ввода у зеркала
         if (mashProp != null) { updateMash(); return; }          // во время «вырвись» мир тоже стоит
 
         // ----- эффекты -----
         if (slowTimer > 0) slowTimer--;
         if (darkTimer > 0) darkTimer--;
         if (weakTimer > 0) weakTimer--;
-        if (distortTimer > 0) distortTimer--;
-        updateSleep();
         if (poisonTimer > 0) {
             poisonTimer--;
             if (poisonTimer % 90 == 0 && player.hp > 1) player.hp--;    // яд не убивает, оставляет 1 сердце
@@ -2278,8 +1485,7 @@ public class GamePanel extends JPanel implements KeyListener {
             stray.onShoulder = true;                          // как и спасённый кот — на плечах: не упадёт в ямы и не отстанет
             pet = stray;
             current.cat = null;
-            say("Кошка запрыгнула тебе на плечи. Теперь она с тобой до конца пути. Мяу!",
-                    "Эльза|Ты тоже ищешь что-нибудь, что можно забрать?");
+            showMessage("Из тени вышла кошка и запрыгнула тебе на плечи. Теперь она с тобой до конца пути. Мяу!");
         }
 
         // ----- кот -----
@@ -2287,10 +1493,9 @@ public class GamePanel extends JPanel implements KeyListener {
         if (pet != null) pet.follow(current, player);
         if (current.cat != null && current.cat.flash > 0) current.cat.flash--;
 
-        for (Prop p : current.props)                          // гости столовой бормочут, пока Эльза рядом
-            if (p.kind == Prop.Kind.DINER) p.active = Math.abs(p.centerX() - player.centerX()) < 320;
+        if (pet != null && isGluttonyRoom(current) && tick % 1200 == 0 && messageTimer == 0)
+            showMessage("Кошка мяукает: «Мяу-мяу! Рыба... в последней комнате!»");
         checkProps();
-        if (pet != null) checkCatHints();
         updateGoals();
         checkSpikes();
         trackSafeSpot();
@@ -2363,7 +1568,9 @@ public class GamePanel extends JPanel implements KeyListener {
             return;
         }
 
-        Rectangle hit = swordHit();
+        int fx = player.facing == Player.Dir.RIGHT ? 1 : player.facing == Player.Dir.LEFT ? -1 : 0;
+        int fy = player.facing == Player.Dir.DOWN ? 1 : player.facing == Player.Dir.UP ? -1 : 0;
+        Rectangle hit = new Rectangle(player.centerX() + fx * 34 - 30, player.centerY() + fy * 34 - 30, 60, 60);
         int dmg = Math.max(1, (equipped != null ? equipped.damage : 1) - (weakTimer > 0 ? 1 : 0));
 
         for (Totem t : current.totems) {                      // тотемы ярости
@@ -2373,8 +1580,6 @@ public class GamePanel extends JPanel implements KeyListener {
                         ? "Тотем разбит! Осталось: " + current.totemsLeft() : "Тотем разбит!");
             }
         }
-
-        hitIllusion();                                        // Чревоугодие: развеять иллюзию столовой
 
         for (Vase v : current.vases) {                        // разбить вазы = штраф
             if (v.state == Vase.State.INTACT && hit.intersects(v.box())) smashVase(v);
@@ -2386,13 +1591,6 @@ public class GamePanel extends JPanel implements KeyListener {
             c.flash = 10;
             if (c.hp <= 0) killCat(c);
         }
-    }
-
-    // область, куда попадает клинок при взмахе
-    private Rectangle swordHit() {
-        int fx = player.facing == Player.Dir.RIGHT ? 1 : player.facing == Player.Dir.LEFT ? -1 : 0;
-        int fy = player.facing == Player.Dir.DOWN ? 1 : player.facing == Player.Dir.UP ? -1 : 0;
-        return new Rectangle(player.centerX() + fx * 34 - 30, player.centerY() + fy * 34 - 30, 60, 60);
     }
 
     private void killCat(Cat c) {
@@ -2417,7 +1615,7 @@ public class GamePanel extends JPanel implements KeyListener {
     // ближайший невыбранный «выбор» в радиусе действия
     private Decision nearChoice() {
         Decision c = current.choice;
-        if (c == null || c.decided || marksPending()) return null;   // пока не прочитаны метки роста, выбор недоступен
+        if (c == null || c.decided) return null;
         return Math.hypot(c.centerX() - player.centerX(), c.centerY() - player.centerY()) < 80 ? c : null;
     }
 
@@ -2434,23 +1632,7 @@ public class GamePanel extends JPanel implements KeyListener {
             effect = applyCurse();
         }
         unlockExit(null);
-        if ("r6_2".equals(current.key)) {                     // кровать: свет возвращается; уснула — тёмный экран и слабость
-            sleepDark = 0;
-            if (!opt.good()) {
-                blackText = "Zzz…";
-                blackTimer = 150;
-                slowTimer = Math.max(slowTimer, 600);
-            }
-        }
-        if (c.kind == Decision.Kind.RAG && opt.good()) {      // её комната: игрушка
-            say(opt.result() + "\n" + effect,
-                    "Эльза|Когда-то мне было достаточно целого дома.",
-                    "Эльза|Теперь мне достаточно этого.");
-            return;
-        }
-        if (c.kind == Decision.Kind.FISH)                     // мусорная комната: Эльза говорит с кошкой
-            say(opt.result() + "\n" + effect, opt.good() ? "Эльза|Наверное... ты голоднее меня." : "Эльза|Прости.");
-        else showMessage(opt.result() + "\n" + effect);
+        showMessage(opt.result() + "\n" + effect);
     }
 
     private boolean nearCat() {
@@ -2469,20 +1651,9 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private void interact() {
         if (invOpen || won || checkTimer > 0) return;
-        Decision cc = current.choice;
-        if (cc != null && !cc.decided && marksPending()
-                && Math.hypot(cc.centerX() - player.centerX(), cc.centerY() - player.centerY()) < 80) {
-            showMessage("Сначала прочти метки роста на стене (E)");
-            return;
-        }
         Decision ch = nearChoice();
         if (ch != null) {                                     // E — первый вариант выбора
             resolveChoice(ch, ch.optE);
-            return;
-        }
-        Prop ap = nearAction();
-        if (ap != null) {                                     // загадки приюта (игрушки, печать)
-            doAction(ap);
             return;
         }
         if (nearCat()) {                                      // спасти кота: он садится на плечи
@@ -2552,11 +1723,11 @@ public class GamePanel extends JPanel implements KeyListener {
         sins.good(r.key);                                          // для комнат-грехов (s1..s7); для остальных ничего не делает
         refreshHallLocks(loc);
         int n = roomsDone(loc);
-        if (n == roomsIn(loc) || loc == LOCS) {
+        if (n == 4 || loc == LOCS) {
             hall.exitLocked = false;
             showMessage("Локация пройдена! В конце коридора открыта дверь СПУСК");
         } else {
-            showMessage("Комната пройдена (" + n + "/" + roomsIn(loc) + "). Откроется следующая дверь");
+            showMessage("Комната пройдена (" + n + "/4). Откроется следующая дверь");
         }
     }
 
@@ -2574,12 +1745,8 @@ public class GamePanel extends JPanel implements KeyListener {
                 return;
             }
             enterRoom(rooms.get(door.targetRoom()));
-            if (pet != null && isGluttonyRoom(current) && catIntro.add(current.key)) {
-                if (current.key.equals("r5_1"))
-                    showMessage("Кошка на плечах насторожилась: она реагирует только на то, что существует на самом деле.");
-                else if (current.key.equals("s5"))
-                    showMessage("Кошка на плечах принюхалась и тихо замяукала: здесь всё настоящее — и мусор, и рыба.");
-            }
+            if (pet != null && isGluttonyRoom(current))
+                showMessage("Кошка на плечах мяукает: «Мяу! Иди в последнюю комнату — там рыба!»");
             respawnCol = door.spawnCol();
             respawnRow = door.spawnRow();
             player.setTile(respawnCol, respawnRow);
@@ -2617,29 +1784,9 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     // ================= ОТРИСОВКА =================
-    // Лень: пока Эльзе плохо, картинка идёт волнами и зеленеет
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        if (distortTimer > 0 && current != null && cutscene == null && epilogue == null) {
-            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(Room.VIEW_W, Room.VIEW_H, java.awt.image.BufferedImage.TYPE_INT_RGB);
-            Graphics2D ig = img.createGraphics();
-            paintScene(ig);
-            ig.dispose();
-            double k = Math.min(1.0, distortTimer / 60.0);        // в последнюю секунду эффект затухает
-            Graphics2D g2 = (Graphics2D) g;
-            for (int y = 0; y < Room.VIEW_H; y += 4) {
-                int off = (int) Math.round(Math.sin(tick * 0.15 + y * 0.05) * 14 * k);
-                g2.drawImage(img, off, y, Room.VIEW_W + off, y + 4, 0, y, Room.VIEW_W, y + 4, null);
-            }
-            g2.setColor(new Color(60, 130, 60, (int) (70 * k)));
-            g2.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
-        } else {
-            paintScene(g);
-        }
-    }
-
-    private void paintScene(Graphics g) {
         if (current == null) return;
         if (cutscene != null) {
             cutscene.draw((Graphics2D) g);
@@ -2665,29 +1812,6 @@ public class GamePanel extends JPanel implements KeyListener {
         entities.sort(Comparator.comparingInt(Entity::feetY));
         for (Entity en : entities) en.draw(world, tick);
 
-        if (carryCrest >= 0 && current.sideView) {             // ваза с гербом над головой Эльзы
-            Prop.crestIcon(world, player.centerX(), player.y - 50, carryCrest, 0.9);
-        }
-        if (carryGDress >= 0 && current.sideView) {            // платье в руках над головой Эльзы
-            Prop.girlDress(world, player.centerX(), player.y - 62, carryGDress, 0.8, false);
-        }
-        if (carryTItem >= 0 && current.sideView) {             // предмет со стола над головой Эльзы
-            Prop.tableItem(world, player.centerX() - 20, player.y - 70, carryTItem, 0.8);
-        }
-        if (carryToy >= 0 && current.sideView) {               // игрушка в руках над головой Эльзы
-            Prop.toyIcon(world, player.centerX() - 11, player.y - 62, carryToy, 0.5);
-        }
-        Prop actionProp = nearAction();
-        if (actionProp != null) {                              // подсказка у предмета, с которым можно взаимодействовать
-            String hint = actionPrompt(actionProp);
-            world.setFont(new Font("Monospaced", Font.BOLD, 15));
-            int hw = world.getFontMetrics().stringWidth(hint);
-            int hx = actionProp.centerX() - hw / 2, hy = (actionProp.row + 1) * Room.TILE + 28;
-            world.setColor(new Color(0, 0, 0, 170));
-            world.fillRect(hx - 6, hy - 16, hw + 12, 22);
-            world.setColor(new Color(250, 236, 190));
-            world.drawString(hint, hx, hy);
-        }
         if (checkTimer > 0) {                                  // полоска проверки вазы
             int bx = player.centerX() - 22, by = player.y - 46;
             world.setColor(new Color(0, 0, 0, 170));
@@ -2700,42 +1824,14 @@ public class GamePanel extends JPanel implements KeyListener {
         Graphics2D overlay = (Graphics2D) g.create();
         if (current.sideView) drawVignette(overlay);
         if (darkTimer > 0) drawDarkness(overlay, player.centerX() - cx, player.centerY() - cy);
-        if (sleepDark > 0.01) drawSleep(overlay);
         overlay.dispose();
 
         drawHud((Graphics2D) g);
         drawTitleCard((Graphics2D) g);
         if (dialog != null) drawDialog((Graphics2D) g);
         if (mashProp != null) drawMash((Graphics2D) g);
-        if (inputProp != null) drawInput((Graphics2D) g);
         if (invOpen) drawInventory((Graphics2D) g);
         if (won) drawVictory((Graphics2D) g);
-        if (blackTimer > 0) drawBlackout((Graphics2D) g);
-    }
-
-    // тёмный экран после неудачного «вырвись» у Криса: чёрный кадр, стон, потом свет возвращается
-    private void drawBlackout(Graphics2D g) {
-        int a = blackTimer > 55 ? 255 : blackTimer * 255 / 55;
-        g.setColor(new Color(0, 0, 0, a));
-        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
-        if (blackTimer > 25) {
-            g.setFont(new Font("Monospaced", Font.ITALIC | Font.BOLD, 26));
-            g.setColor(new Color(170, 60, 70, Math.min(255, a)));
-            drawCentered(g, blackText, Room.VIEW_H / 2);
-        }
-    }
-
-    // Лень, комната 2: экран темнеет и плывут «z»
-    private void drawSleep(Graphics2D g) {
-        g.setColor(new Color(4, 6, 18, (int) (255 * Math.min(0.9, sleepDark))));
-        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
-        g.setFont(new Font("Monospaced", Font.BOLD, 28));
-        for (int i = 0; i < 6; i++) {
-            int zx = 120 + i * 150 + (int) (Math.sin(tick * 0.02 + i) * 20);
-            int zy = Room.VIEW_H - ((tick * (1 + i % 3) / 2 + i * 97) % Room.VIEW_H);
-            g.setColor(new Color(170, 190, 255, (int) (140 * Math.min(1.0, sleepDark * 1.5))));
-            g.drawString(i % 2 == 0 ? "z" : "Z", zx, zy);
-        }
     }
 
     private void drawVignette(Graphics2D g) {
@@ -2867,7 +1963,7 @@ public class GamePanel extends JPanel implements KeyListener {
         Room r = current;
         if (isHall(r)) {
             return r.exitLocked ? (r.key.charAt(1) - '0' == LOCS ? "Цель: войди в большую комнату Гордыни"
-                    : "Цель: пройди " + roomsIn(r.key.charAt(1) - '0') + " комнаты по порядку (" + roomsDone(r.key.charAt(1) - '0') + "/" + roomsIn(r.key.charAt(1) - '0') + ")")
+                    : "Цель: пройди 4 комнаты по порядку (" + roomsDone(r.key.charAt(1) - '0') + "/4)")
                     : "Цель: спустись — дверь СПУСК в конце коридора";
         }
         if (r.key != null && r.key.startsWith("road")) return "Цель: пройди дорогу ловушек и спустись глубже";
@@ -2878,8 +1974,7 @@ public class GamePanel extends JPanel implements KeyListener {
             case TOTEMS  -> r.exitLocked ? "Цель: разбей тотемы (осталось " + r.totemsLeft() + ")" : open;
             case CAT     -> r.exitLocked ? "Цель: спаси кота (E) или убей его (L)" : open;
             case CHOICE  -> r.exitLocked ? "Цель: сделай выбор (E или L)" : open;
-            case PUZZLE  -> r.exitLocked ? ("ответь зеркалу".equals(r.goalLabel) ? "Цель: подойди к зеркалу и ответь Анне" : "Цель: " + r.goalLabel + " (E у предметов в комнате)") : open;
-            case ESCAPE  -> r.exitLocked ? ("вырвись".equals(r.goalLabel) ? "Цель: подойди к нему и вырвись (E / ПРОБЕЛ)" : "Цель: подойди к Себастьяну и открой дверь (E / ПРОБЕЛ)") : open;
+            case ESCAPE  -> r.exitLocked ? "Цель: подойди к нему и вырвись (E / ПРОБЕЛ)" : open;
             default      -> "Цель: дойди до выхода справа";
         };
     }
@@ -3161,7 +2256,6 @@ public class GamePanel extends JPanel implements KeyListener {
         dialogProp = null;
         mashProp = null;
         mashDown.clear();
-        inputProp = null;
         checkTimer = 0;
         checkVase = null;
         invOpen = false;
@@ -3215,7 +2309,7 @@ public class GamePanel extends JPanel implements KeyListener {
     // засчитывает все комнаты локации и открывает дверь СПУСК
     private void completeLocation(int loc) {
         Room hall = rooms.get(hallKey(loc));
-        for (int n = 1; n <= roomsIn(loc); n++) {
+        for (int n = 1; n <= 4; n++) {
             if (loc == LOCS && n < 4) continue;               // у Гордыни одна комната
             String key = trialKey(loc, n);
             done.add(key);
@@ -3237,8 +2331,6 @@ public class GamePanel extends JPanel implements KeyListener {
     void adminHeal() {
         player.hp = player.maxHp;
         slowTimer = poisonTimer = darkTimer = weakTimer = 0;
-        distortTimer = 0;
-        sleepDark = 0;
         slowPermanent = false;
         showMessage("Админ: сердца восстановлены, эффекты сняты");
     }
@@ -3254,8 +2346,8 @@ public class GamePanel extends JPanel implements KeyListener {
         List<String> out = new ArrayList<>();
         for (int loc = 1; loc <= LOCS; loc++) {
             out.add(hallKey(loc));
-            if (loc != LOCS) for (int n = 1; n < roomsIn(loc); n++) out.add(trialKey(loc, n));
-            out.add(trialKey(loc, roomsIn(loc)));
+            if (loc != LOCS) for (int n = 1; n <= 3; n++) out.add(trialKey(loc, n));
+            out.add(trialKey(loc, 4));
             out.add(roadKey(loc));
         }
         out.removeIf(k -> !rooms.containsKey(k));
@@ -3347,16 +2439,6 @@ public class GamePanel extends JPanel implements KeyListener {
             return;
         }
 
-        if (inputProp != null) {                                         // окно ввода у зеркала: печатаем ответ
-            if (k == KeyEvent.VK_ENTER) submitInput();
-            else if (k == KeyEvent.VK_BACK_SPACE) { if (inputBuf.length() > 0) inputBuf.setLength(inputBuf.length() - 1); }
-            else if (k == KeyEvent.VK_ESCAPE) {
-                inputProp = null;
-                showMessage("Эльза отвернулась от зеркала. Подойди и посмотри ещё раз (E)");
-            }
-            return;
-        }
-
         if (mashProp != null) {                                          // «вырвись»: считаем только новые нажатия
             int code = isKey(e, KeyEvent.VK_E, 'у') ? KeyEvent.VK_E : k;
             if ((code == KeyEvent.VK_SPACE || code == KeyEvent.VK_E || code == KeyEvent.VK_ENTER) && mashDown.add(code)) mashPress();
@@ -3411,12 +2493,5 @@ public class GamePanel extends JPanel implements KeyListener {
         }
     }
 
-    @Override public void keyTyped(KeyEvent e) {
-        if (inputProp == null) return;
-        char c = e.getKeyChar();
-        if (c >= 32 && c != 127 && inputBuf.length() < 20) {
-            inputBuf.append(c);
-            inputMsg = "";
-        }
-    }
+    @Override public void keyTyped(KeyEvent e) {}
 }
