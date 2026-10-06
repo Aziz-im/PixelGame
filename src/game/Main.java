@@ -12,6 +12,34 @@ public class Main {
     }
 }
 
+// Масштаб картинки под размер окна: игра рисуется в «логических» 960x576, а на экране растягивается с чёрными полями.
+final class View {
+    private View() {}
+
+    static double scale(Component c) {
+        return Math.min(c.getWidth() / (double) Room.VIEW_W, c.getHeight() / (double) Room.VIEW_H);
+    }
+
+    static double offX(Component c) { return (c.getWidth() - Room.VIEW_W * scale(c)) / 2.0; }
+    static double offY(Component c) { return (c.getHeight() - Room.VIEW_H * scale(c)) / 2.0; }
+
+    // сдвигает и масштабирует кисть; дальше можно рисовать как в обычном окне 960x576
+    static void apply(Graphics2D g, Component c) {
+        double k = scale(c);
+        if (k <= 0) return;
+        g.translate(offX(c), offY(c));
+        g.scale(k, k);
+        g.clipRect(0, 0, Room.VIEW_W, Room.VIEW_H);
+    }
+
+    // координаты мыши на экране -> координаты в игре (960x576)
+    static Point toLogical(Component c, Point p) {
+        double k = scale(c);
+        if (k <= 0) return p;
+        return new Point((int) Math.floor((p.x - offX(c)) / k), (int) Math.floor((p.y - offY(c)) / k));
+    }
+}
+
 class GameWindow extends JFrame {
     private final CardLayout cards = new CardLayout();
     private final JPanel root = new JPanel(cards);
@@ -28,31 +56,74 @@ class GameWindow extends JFrame {
         root.add(gamePanel, "GAME");
         add(root);
 
-        setResizable(false);
+        setResizable(true);                       // можно растягивать и разворачивать окно — картинка масштабируется
         pack();
+        setMinimumSize(getSize());
         setLocationRelativeTo(null);
+        setupFullscreenKey();
         setVisible(true);
         showMenu();
+    }
+
+    // ===== полный экран: F11 (в любом месте игры) или кнопка «развернуть» у окна =====
+    private boolean fullscreen;
+    private String currentCard = "MAIN";
+
+    private void setupFullscreenKey() {
+        InputMap im = getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        im.put(KeyStroke.getKeyStroke("F11"), "fullscreen");
+        getRootPane().getActionMap().put("fullscreen", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { toggleFullscreen(); }
+        });
+    }
+
+    public void toggleFullscreen() {
+        fullscreen = !fullscreen;
+        Rectangle screen = getGraphicsConfiguration().getBounds();
+        dispose();                                // режим окна (с рамкой / без) меняется только у закрытого окна
+        setUndecorated(fullscreen);
+        if (fullscreen) {
+            setExtendedState(JFrame.NORMAL);
+            setBounds(screen);
+        } else {
+            pack();
+            setLocationRelativeTo(null);
+        }
+        setVisible(true);
+        SwingUtilities.invokeLater(this::focusCurrent);
+    }
+
+    private void focusCurrent() {
+        switch (currentCard) {
+            case "GAME" -> gamePanel.requestFocusInWindow();
+            case "PAUSE" -> pauseMenu.requestFocusInWindow();
+            default -> mainMenu.requestFocusInWindow();
+        }
+    }
+
+    private void show(String card) {
+        currentCard = card;
+        cards.show(root, card);
     }
 
     // Главное меню без сохранения: при запуске и после финала игры (GamePanel вызывает именно этот метод).
     public void showMenu() {
         gamePanel.stop();
         mainMenu.setProgress(null);
-        cards.show(root, "MAIN");
+        show("MAIN");
     }
 
     // ESC во время игры: пауза, мир замирает, ничего не сбрасывается
     public void showPause() {
         gamePanel.pause();
-        cards.show(root, "PAUSE");
+        show("PAUSE");
     }
 
     // в меню паузы нажали ИГРАТЬ (или ещё раз ESC) / в главном меню нажали ПРОДОЛЖИТЬ
     public void resumeGame() { continueGame(); }
 
     public void continueGame() {
-        cards.show(root, "GAME");
+        show("GAME");
         gamePanel.resume();
     }
 
@@ -60,12 +131,12 @@ class GameWindow extends JFrame {
     public void exitToMainMenu() {
         gamePanel.pause();
         mainMenu.setProgress(gamePanel.progressText());
-        cards.show(root, "MAIN");
+        show("MAIN");
     }
 
     // в главном меню нажали ИГРАТЬ: новая игра с нуля
     public void startNewGame() {
-        cards.show(root, "GAME");
+        show("GAME");
         gamePanel.start();
         gamePanel.requestFocusInWindow();
     }

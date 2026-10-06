@@ -6,6 +6,9 @@ import java.awt.event.*;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.io.IOException;
+import java.io.File;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -72,7 +75,29 @@ public class GamePanel extends JPanel implements KeyListener {
     private String inputMsg = "";
     private int carryToy = -1;                            // Алчность, комната 1: игрушка в руках (0 кубики, 1 мишка, 2 мячик; -1 — пусто)
     private int tick;
-    private final Timer timer = new Timer(16, e -> { tick++; update(); repaint(); });
+    // Игровой цикл с фиксированным шагом 60 обновлений в секунду. Обычный Timer(16) на Windows срабатывает
+    // примерно раз в 31 мс (будто 30 к/с) — из-за этого герой «ползал». Здесь сколько времени прошло,
+    // столько шагов и делается, поэтому скорость не зависит от лагов отрисовки.
+    private static final long STEP_NS = 1_000_000_000L / 60;
+    private long lastNs, accNs;
+    private final Timer timer = new Timer(4, e -> loop());
+
+    private void loop() {
+        long now = System.nanoTime();
+        if (lastNs == 0) lastNs = now;
+        accNs = Math.min(accNs + (now - lastNs), STEP_NS * 4);      // после долгой паузы не «догоняем» кучу шагов
+        lastNs = now;
+        boolean stepped = false;
+        while (accNs >= STEP_NS && timer.isRunning()) {
+            accNs -= STEP_NS;
+            tick++;
+            update();
+            stepped = true;
+        }
+        if (stepped) repaint();
+    }
+
+    private void startLoop() { lastNs = 0; accNs = 0; timer.start(); }
 
     private boolean up, down, left, right, jump;
     private int respawnCol, respawnRow;                   // куда вернёт после потери сознания
@@ -134,6 +159,7 @@ public class GamePanel extends JPanel implements KeyListener {
     public GamePanel(GameWindow window) {
         this.window = window;
         setPreferredSize(new Dimension(Room.VIEW_W, Room.VIEW_H));
+        setBackground(Color.BLACK);
         setFocusable(true);
         setFocusTraversalKeysEnabled(false);
         addKeyListener(this);
@@ -150,7 +176,7 @@ public class GamePanel extends JPanel implements KeyListener {
                 requestFocusInWindow();
                 if (!invOpen) return;                             // удар мечом теперь только на L
                 for (int i = 0; i < Inventory.SLOTS; i++) {       // клик по слоту в инвентаре
-                    if (slotRect(i).contains(e.getPoint())) {
+                    if (slotRect(i).contains(View.toLogical(GamePanel.this, e.getPoint()))) {
                         if (selected == i) useSelected();
                         else selected = i;
                         return;
@@ -2291,7 +2317,7 @@ public class GamePanel extends JPanel implements KeyListener {
         snapCamera();
         showMessage("Коридор Гнева. WASD — ходьба, берегись стрел. Первая дверь — вверху слева");
         cutscene = new Cutscene();                // сначала катсцена №1, потом игра
-        timer.start();
+        startLoop();
     }
 
     public void stop() {
@@ -2320,7 +2346,7 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     public void resume() {
-        timer.start();
+        startLoop();
         requestFocusInWindow();
     }
 
@@ -2860,10 +2886,20 @@ public class GamePanel extends JPanel implements KeyListener {
     // ================= ОТРИСОВКА =================
     // Лень: пока Эльзе плохо, картинка идёт волнами и зеленеет
     @Override
-    protected void paintComponent(Graphics g) {
-        super.paintComponent(g);
+    protected void paintComponent(Graphics g0) {
+        super.paintComponent(g0);                                  // чёрные поля по краям при полном экране
+        Graphics2D g = (Graphics2D) g0.create();
+        View.apply(g, this);                                       // масштаб под размер окна
+        paintGame(g);
+        g.dispose();
+    }
+
+    private java.awt.image.BufferedImage distortBuf;                // буфер эффекта «плывёт» (не создаём новый каждый кадр)
+
+    private void paintGame(Graphics g) {
         if (distortTimer > 0 && current != null && cutscene == null && epilogue == null) {
-            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(Room.VIEW_W, Room.VIEW_H, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            if (distortBuf == null) distortBuf = new java.awt.image.BufferedImage(Room.VIEW_W, Room.VIEW_H, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            java.awt.image.BufferedImage img = distortBuf;
             Graphics2D ig = img.createGraphics();
             paintScene(ig);
             ig.dispose();
@@ -2981,22 +3017,41 @@ public class GamePanel extends JPanel implements KeyListener {
         }
     }
 
+    // Градиенты на весь экран очень дорогие, а при полном экране ещё дороже — поэтому рисуем их один раз в картинки.
+    private static BufferedImage vignetteImg, darkImg;
+
     private void drawVignette(Graphics2D g) {
-        RadialGradientPaint p = new RadialGradientPaint(
-                new Point2D.Float(Room.VIEW_W / 2f, Room.VIEW_H / 2f), Room.VIEW_W * 0.6f,
-                new float[]{0.55f, 1f},
-                new Color[]{new Color(0, 0, 0, 0), new Color(0, 0, 0, 190)});
-        g.setPaint(p);
-        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
+        if (vignetteImg == null) {
+            vignetteImg = new BufferedImage(Room.VIEW_W, Room.VIEW_H, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D ig = vignetteImg.createGraphics();
+            ig.setPaint(new RadialGradientPaint(
+                    new Point2D.Float(Room.VIEW_W / 2f, Room.VIEW_H / 2f), Room.VIEW_W * 0.6f,
+                    new float[]{0.55f, 1f},
+                    new Color[]{new Color(0, 0, 0, 0), new Color(0, 0, 0, 190)}));
+            ig.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
+            ig.dispose();
+        }
+        g.drawImage(vignetteImg, 0, 0, null);
     }
 
     private void drawDarkness(Graphics2D g, int px, int py) {
-        RadialGradientPaint p = new RadialGradientPaint(
-                new Point2D.Float(px, py), 170f,
-                new float[]{0f, 0.45f, 1f},
-                new Color[]{new Color(0, 0, 0, 0), new Color(0, 0, 0, 0), new Color(0, 0, 0, 240)});
-        g.setPaint(p);
-        g.fillRect(0, 0, Room.VIEW_W, Room.VIEW_H);
+        final int R = 170;
+        if (darkImg == null) {
+            darkImg = new BufferedImage(R * 2, R * 2, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D ig = darkImg.createGraphics();
+            ig.setPaint(new RadialGradientPaint(
+                    new Point2D.Float(R, R), R,
+                    new float[]{0f, 0.45f, 1f},
+                    new Color[]{new Color(0, 0, 0, 0), new Color(0, 0, 0, 0), new Color(0, 0, 0, 240)}));
+            ig.fillRect(0, 0, R * 2, R * 2);
+            ig.dispose();
+        }
+        g.setColor(new Color(0, 0, 0, 240));                         // за пределами круга света — сплошная тьма
+        g.fillRect(0, 0, Room.VIEW_W, Math.max(0, py - R));
+        g.fillRect(0, Math.min(Room.VIEW_H, py + R), Room.VIEW_W, Math.max(0, Room.VIEW_H - (py + R)));
+        g.fillRect(0, py - R, Math.max(0, px - R), R * 2);
+        g.fillRect(Math.min(Room.VIEW_W, px + R), py - R, Math.max(0, Room.VIEW_W - (px + R)), R * 2);
+        g.drawImage(darkImg, px - R, py - R, null);
     }
 
     // заставка при входе: вспышка цвета греха + название
@@ -3021,63 +3076,59 @@ public class GamePanel extends JPanel implements KeyListener {
         }
     }
 
+    // картинки-обложки финалов: heaven_bg.png и hell_bg.png лежат рядом с GamePanel.java (как menu_bg.png)
+    private static final Map<String, BufferedImage> ENDING_BG = new HashMap<>();
+
+    private static BufferedImage loadEndingBg(String name) {
+        if (ENDING_BG.containsKey(name)) return ENDING_BG.get(name);
+        BufferedImage img = null;
+        try {
+            java.net.URL u = GamePanel.class.getResource(name);
+            if (u != null) img = ImageIO.read(u);
+            else {
+                File f = new File("src/game/" + name);               // запасной путь, если запускаешь не из IDE
+                if (f.exists()) img = ImageIO.read(f);
+            }
+        } catch (Exception ignored) { }
+        ENDING_BG.put(name, img);
+        return img;
+    }
+
     private void drawVictory(Graphics2D g) {
         boolean heaven = ending == Sins.Ending.HEAVEN;
-        int W = Room.VIEW_W, H = Room.VIEW_H, cx = W / 2;
+        int W = Room.VIEW_W, H = Room.VIEW_H;
 
-        g.setPaint(heaven ? new GradientPaint(0, 0, new Color(255, 250, 215), 0, H, new Color(150, 200, 255))
-                : new GradientPaint(0, 0, new Color(20, 0, 0), 0, H, new Color(170, 30, 10)));
-        g.fillRect(0, 0, W, H);
-
-        if (heaven) {                                                    // лучи света и фигура бога
-            g.setColor(new Color(255, 255, 255, 70));
-            for (int i = -3; i <= 3; i++)
-                g.fillPolygon(new int[]{cx, cx + i * 90 - 30, cx + i * 90 + 30}, new int[]{40, H, H}, 3);
-            g.setColor(new Color(255, 230, 120));
-            g.fillOval(cx - 40, 56, 80, 14);                             // нимб
-            g.setColor(new Color(250, 225, 195));
-            g.fillRect(cx - 18, 76, 36, 34);                             // голова
-            g.setColor(new Color(235, 235, 235));
-            g.fillRect(cx - 26, 70, 52, 12);                             // волосы и борода
-            g.fillRect(cx - 18, 100, 36, 24);
-            g.setColor(Color.WHITE);
-            g.fillRect(cx - 40, 122, 80, 120);                           // одеяние
-            g.fillRect(cx - 100, 128, 60, 24);
-            g.fillRect(cx + 40, 128, 60, 24);
-            g.setColor(Color.BLACK);
-            g.fillRect(cx - 10, 90, 4, 4);
-            g.fillRect(cx + 6, 90, 4, 4);
-        } else {                                                         // демон
-            g.setColor(new Color(40, 0, 0));
-            g.fillRect(0, H - 70, W, 70);
-            g.setColor(new Color(255, 120, 20));
-            for (int i = 0; i < 12; i++) g.fillRect(i * 90 + 10, H - 70 - (i * 37 % 30), 40, 30);
-            g.setColor(new Color(120, 15, 25));
-            g.fillRect(cx - 40, 110, 80, 130);                           // тело
-            g.fillRect(cx - 30, 56, 60, 56);                             // голова
-            g.setColor(new Color(240, 230, 200));
-            g.fillPolygon(new int[]{cx - 30, cx - 52, cx - 16}, new int[]{62, 20, 56}, 3);     // рога
-            g.fillPolygon(new int[]{cx + 30, cx + 52, cx + 16}, new int[]{62, 20, 56}, 3);
-            g.setColor(new Color(255, 220, 40));
-            g.fillRect(cx - 20, 76, 14, 8);
-            g.fillRect(cx + 6, 76, 14, 8);
-            g.setColor(Color.BLACK);
-            g.fillRect(cx - 16, 100, 32, 6);
-            g.setColor(new Color(120, 15, 25));
-            g.fillRect(cx - 110, 120, 70, 20);
-            g.fillRect(cx + 40, 120, 70, 20);
+        BufferedImage pic = loadEndingBg(heaven ? "heaven_bg.png" : "hell_bg.png");
+        if (pic != null) {                                               // обложка финала — картинка на весь экран
+            double k = Math.max(W / (double) pic.getWidth(), H / (double) pic.getHeight());
+            int dw = (int) Math.ceil(pic.getWidth() * k), dh = (int) Math.ceil(pic.getHeight() * k);
+            int dx = (W - dw) / 2, dy = -(int) ((dh - H) * 0.25);        // чуть выше центра, чтобы лицо не обрезалось
+            Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g.drawImage(pic, dx, dy, dw, dh, null);
+            if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
+            g.setPaint(new GradientPaint(0, 250, new Color(8, 6, 14, 0), 0, H, new Color(8, 6, 14, 230)));
+            g.fillRect(0, 250, W, H - 250);                              // затемнение снизу под текст
+        } else {                                                         // картинки нет — просто фон
+            g.setPaint(heaven ? new GradientPaint(0, 0, new Color(255, 250, 215), 0, H, new Color(150, 200, 255))
+                    : new GradientPaint(0, 0, new Color(20, 0, 0), 0, H, new Color(170, 30, 10)));
+            g.fillRect(0, 0, W, H);
         }
+        boolean light = heaven && pic == null;                           // тёмный текст только на светлом запасном фоне
 
         g.setFont(new Font("Monospaced", Font.BOLD, 56));
-        g.setColor(heaven ? new Color(60, 90, 160) : new Color(255, 200, 60));
-        drawCentered(g, heaven ? "РАЙ" : "АД", 300);
+        g.setColor(new Color(0, 0, 0, 190));
+        drawCentered(g, heaven ? "РАЙ" : "АД", 403);
+        g.setColor(light ? new Color(60, 90, 160) : heaven ? new Color(255, 225, 120) : new Color(255, 120, 60));
+        drawCentered(g, heaven ? "РАЙ" : "АД", 400);
         g.setFont(new Font("Monospaced", Font.BOLD, 18));
-        g.setColor(heaven ? new Color(40, 60, 110) : Color.WHITE);
-        drawCentered(g, "Добрых: " + sins.goodCount() + "   Плохих: " + sins.badCount()
-                + "   (Рай — от " + Sins.HEAVEN_LIMIT + " добрых, Ад — от " + Sins.HELL_LIMIT + " плохих)", 340);
+        String stat = "Добрых: " + sins.goodCount() + "   Плохих: " + sins.badCount()
+                + "   (Рай — от " + Sins.HEAVEN_LIMIT + " добрых, Ад — от " + Sins.HELL_LIMIT + " плохих)";
+        g.setColor(light ? new Color(40, 60, 110) : Color.WHITE);
+        drawCentered(g, stat, 450);
         g.setFont(new Font("Monospaced", Font.PLAIN, 16));
-        g.setColor(heaven ? new Color(40, 60, 110) : new Color(230, 200, 190));
-        drawCentered(g, "Enter — дальше (эпилог начнётся сам)", 380);
+        g.setColor(light ? new Color(40, 60, 110) : new Color(225, 225, 235));
+        drawCentered(g, "Enter — дальше (эпилог начнётся сам)", 500);
     }
 
     private void drawHeart(Graphics2D g, int x, int y, boolean full) {

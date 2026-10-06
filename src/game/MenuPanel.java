@@ -101,7 +101,8 @@ public class MenuPanel extends JPanel {
         else window.exitToMainMenu();             // ВЫХОД — в главное меню (игра запоминается)
     }
 
-    private int hit(Point p) {
+    private int hit(Point screen) {
+        Point p = View.toLogical(this, screen);
         if (scaled(PLAY_R).contains(p)) return 0;
         if (scaled(EXIT_R).contains(p)) return 1;
         return -1;
@@ -140,6 +141,7 @@ public class MenuPanel extends JPanel {
         a.dispose();
 
         Graphics2D g = (Graphics2D) g0.create();
+        View.apply(g, this);                                          // масштаб под размер окна
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
         g.drawImage(art, 0, 0, W, H, null);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);

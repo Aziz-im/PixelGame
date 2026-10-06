@@ -150,7 +150,8 @@ public class MainMenuPanel extends JPanel {
         }
     }
 
-    private int hit(Point p) {
+    private int hit(Point screen) {
+        Point p = View.toLogical(this, screen);
         for (int i = 0; i < btns.size(); i++) {
             Rectangle r = btns.get(i).r;
             if (new Rectangle(r.x * S, r.y * S, r.width * S, r.height * S).contains(p)) return i;
@@ -195,6 +196,7 @@ public class MainMenuPanel extends JPanel {
     protected void paintComponent(Graphics g0) {
         super.paintComponent(g0);
         Graphics2D g = (Graphics2D) g0.create();
+        View.apply(g, this);                                          // масштаб под размер окна
 
         if (bg != null) {
             g.drawImage(bg, 0, 0, W, H, null);
