@@ -61,19 +61,19 @@ public class Trap {
             case HIDDEN_SPIKES -> {
                 switch (state) {
                     case 0 -> {
-                        boolean near = Math.abs(p.centerX() - (col * T + T / 2)) < 72
+                        boolean near = Math.abs(p.centerX() - (col * T + T / 2)) < 88
                                 && Math.abs(p.centerY() - (row * T + T / 2)) < 70;
-                        if (near) { state = 1; timer = 22; }          // предупреждение: шипы дрожат
+                        if (near) { state = 1; timer = 14; }          // предупреждение: шипы дрожат
                     }
-                    case 1 -> { if (--timer <= 0) { state = 2; timer = 75; } }   // выскочили
-                    case 2 -> { if (--timer <= 0) { state = 3; timer = 50; } }   // прячутся
+                    case 1 -> { if (--timer <= 0) { state = 2; timer = 90; } }   // выскочили
+                    case 2 -> { if (--timer <= 0) { state = 3; timer = 40; } }   // прячутся
                     default -> { if (--timer <= 0) state = 0; }
                 }
             }
             case CRUMBLE -> {
                 if (state == 0) {
                     boolean standing = p.y + p.h == row * T && p.x + p.w > col * T && p.x < (col + 1) * T;
-                    if (standing) { state = 1; timer = 48; }
+                    if (standing) { state = 1; timer = 34; }
                 } else if (state == 1) {
                     if (--timer <= 0) { state = 2; timer = 170; }
                 } else if (--timer <= 0 && !new Rectangle(col * T, row * T, T, T).intersects(p.box())) {
@@ -93,7 +93,7 @@ public class Trap {
     }
 
     // ----- камень -----
-    private static final int ROCK_RADIUS = 76, ROCK_WARN = 44, ROCK_FALL = 18, ROCK_LAND_Y = 10 * T;   // 10 ряд — пол в комнатах сбоку
+    private static final int ROCK_RADIUS = 92, ROCK_WARN = 32, ROCK_FALL = 14, ROCK_LAND_Y = 10 * T;   // 10 ряд — пол в комнатах сбоку
 
     private int rockBottom() {                      // нижний край камня в этот кадр
         int start = (row + 1) * T;
@@ -105,15 +105,15 @@ public class Trap {
     private int sawX(int tick) {
         int mid = (col + col2) * T / 2 + T / 2;
         int amp = (col2 - col) * T / 2;
-        return mid + (int) (Math.sin(tick * 0.03) * amp);
+        return mid + (int) (Math.sin(tick * 0.045) * amp);
     }
 
     private int flamePhase(int tick) {          // 0 — тихо, 1 — искры, 2 — огонь
         int t = (tick + offset) % 200;
-        return t < 110 ? 0 : t < 140 ? 1 : 2;
+        return t < 120 ? 0 : t < 140 ? 1 : 2;
     }
 
-    private static final int ARROW_PERIOD = 170, ARROW_WARN = 100, ARROW_FLY = 130;   // 100..130 — мигает, 130..170 — летит
+    private static final int ARROW_PERIOD = 150, ARROW_WARN = 90, ARROW_FLY = 112;   // 100..130 — мигает, 130..170 — летит
 
     private int arrowPhase(int tick) {              // 0 — тихо, 1 — предупреждение, 2 — стрела в полёте
         int t = (tick + offset) % ARROW_PERIOD;

@@ -61,6 +61,10 @@ public class GamePanel extends JPanel implements KeyListener {
     private final Player player = new Player();
     private Cat pet;                                      // кот, которого ты спас
     private int carryCrest = -1;                          // Гнев, комната 1: герб вазы в руках (-1 — пусто)
+    private Prop carryCrestProp;                          // та ваза на стойке, которую Эльза сейчас держит (со стойки она исчезает)
+    private int inputLock;                                // кадры после реплики, когда E / L ещё ничего не выбирают (защита от случайного выбора)
+    private int dialogCool;                               // кадры после входа в комнату / конца реплики, когда новая реплика не стартует
+    private final Map<Integer, Long> heldAt = new HashMap<>();   // зажатые E / L: автоповтор клавиатуры не считается новым нажатием
     private int carryGDress = -1;                        // Зависть, комната 1: платье в руках (0..3; -1 — пусто)
     private int carryTItem = -1;                          // Зависть, комната 2: предмет со стола в руках (0..5; -1 — пусто)
     private Prop inputProp;                               // Зависть, комната 3: зеркало с открытым окном ввода (null — окна нет)
@@ -99,16 +103,16 @@ public class GamePanel extends JPanel implements KeyListener {
     private int messageTimer;
 
     // диалог Эльзы (реплики вида "Кто|Текст"); null — диалога нет
-    private static final int DIALOG_TYPE = 2;             // кадров на одну букву
+    private static final int DIALOG_TYPE = 3;             // кадров на одну букву
     private String[] dialog;
     private int dialogIdx, dialogT;
     private Prop dialogProp;
     private final Set<String> catIntro = new HashSet<>();     // в каких комнатах Чревоугодия кошка уже что-то «сказала» при входе
 
-    // мини-игра «вырвись»: после диалога с Крисом / Себастьяном жми E или ПРОБЕЛ как можно быстрее
-    private static final int MASH_TIME = 540;             // 9 секунд на попытку
-    private static final double MASH_GAIN = 0.055;        // сколько даёт одно нажатие
-    private static final double MASH_DECAY = 0.0035;      // на сколько шкала падает каждый кадр (он держит)
+    // мини-игра «вырвись»: после диалога с Крисом / Себастьяном жми E как можно быстрее
+    private static final int MASH_TIME = 480;             // 9 секунд на попытку
+    private static final double MASH_GAIN = 0.045;        // сколько даёт одно нажатие
+    private static final double MASH_DECAY = 0.0045;      // на сколько шкала падает каждый кадр (он держит)
     private Prop mashProp;                                // null — мини-игры нет
     private double mashProgress;                          // 0..1: при 1 — вырвалась, при 0 — не удержалась
     private int mashTimer, mashPulse;
@@ -319,7 +323,7 @@ public class GamePanel extends JPanel implements KeyListener {
         seb.alwaysOpen = true;                                 // тапалка есть, но дверь откроется в любом случае
         seb.winLine = "Спасибо... что тогда ты действительно открыл дверь.";
         seb.mashTitle = "ОТКРОЙ ДВЕРЬ!";
-        seb.mashHint = "Жми E или ПРОБЕЛ — вместе с Себастьяном, пока дверь не поддастся";
+        seb.mashHint = "Жми E — вместе с Себастьяном, пока дверь не поддастся";
         r4.props.add(seb);
         crumble(r4, 24, 27, 10);
         flame(r4, 43, 0);
@@ -647,12 +651,12 @@ public class GamePanel extends JPanel implements KeyListener {
                 r.goal = Room.Goal.ESCAPE;
                 r.goalLabel = "вырвись";
                 r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": поговори и вырвись из его рук";
-                hint = "Подойди к нему. Когда он схватит — жми E или ПРОБЕЛ как можно быстрее!";
+                hint = "Подойди к нему. Когда он схватит — жми E как можно быстрее!";
             }
             case 0 -> {
                 r.goal = Room.Goal.CANDLE;
                 r.goalLabel = "найди свечу";
-                r.checkTime = 60 + loc * 20;                        // чем глубже, тем дольше стоять над вазой
+                r.checkTime = 75 + loc * 25;                        // чем глубже, тем дольше стоять над вазой
                 r.subtitle = "Комната " + n + " из " + roomsIn(loc) + ": найди свечу среди " + r.vases.size() + " ваз";
                 hint = "Свеча в одной из " + r.vases.size() + " ваз. E — проверить (" + String.format("%.1f", r.checkTime / 60.0) + " с, стой смирно), L — разбить (штраф!)";
                 vaseGuards(r, loc);
@@ -1321,10 +1325,10 @@ public class GamePanel extends JPanel implements KeyListener {
 
     private String applyCurse() {
         switch (RND.nextInt(4)) {
-            case 0:  slowTimer = 600;   return "Проклятие: замедление (10 с)";
-            case 1:  poisonTimer = 450; return "Яд: ты теряешь здоровье (7 с)";
-            case 2:  darkTimer = 600;   return "Тьма: почти ничего не видно (10 с)";
-            default: weakTimer = 600;   return "Слабость: урон меньше на 1 (10 с)";
+            case 0:  slowTimer = 900;   return "Проклятие: замедление (15 с)";
+            case 1:  poisonTimer = 600; return "Яд: ты теряешь здоровье (10 с)";
+            case 2:  darkTimer = 900;   return "Тьма: почти ничего не видно (15 с)";
+            default: weakTimer = 900;   return "Слабость: урон меньше на 1 (15 с)";
         }
     }
 
@@ -1470,24 +1474,28 @@ public class GamePanel extends JPanel implements KeyListener {
                 showMessage("Эльза села — и упала на пол: стул растаял, он тоже был видением.\nПадение: минус сердце, замедление и слабость. Иллюзия всё ещё стоит — развей её мечом");
             }
             case "CREST_TAKE" -> {
+                if (carryCrestProp != null) carryCrestProp.solved = false;   // прежняя ваза возвращается на свою стойку
+                p.solved = true;                                             // эта ваза теперь у Эльзы: со стойки исчезает
+                carryCrestProp = p;
                 carryCrest = p.want;
-                showMessage("В руках ваза с гербом. Найди пьедестал с гербом Осмаров");
+                showMessage("В руках ваза с гербом (над головой). Найди пьедестал с гербом Осмаров");
             }
             case "PEDESTAL" -> {
                 if (carryCrest < 0) { showMessage("Сначала возьми вазу (E)"); return; }
                 if (carryCrest != p.want) {
-                    carryCrest = -1;
-                    showMessage("Герб на вазе не совпадает с гербом пьедестала. Ваза возвращена на место");
+                    returnCrest();
+                    showMessage("Герб на вазе не совпадает с гербом пьедестала. Ваза вернулась на свою стойку");
                     return;
                 }
                 if (p.want != Prop.OSMAR_CREST) {
-                    carryCrest = -1;
-                    showMessage("Это герб другого рода, не Осмаров. Ваза возвращена на место");
+                    returnCrest();
+                    showMessage("Это герб другого рода, не Осмаров. Ваза вернулась на свою стойку");
                     return;
                 }
                 p.solved = true;
                 p.placed = carryCrest;
                 carryCrest = -1;
+                carryCrestProp = null;                                       // ваза осталась стоять на пьедестале
                 unlockExit("Ваза Осмаров встала на свой пьедестал.");
             }
             case "SEQ" -> {
@@ -1942,9 +1950,11 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // ====== ДИАЛОГИ ======
     private void checkProps() {
+        if (dialogCool > 0 || checkTimer > 0) return;              // реплика не должна вылезать сразу после входа / другой реплики
+        if (current.sideView && !player.onGround) return;         // и пока Эльза в прыжке или падает
         for (Prop p : current.props) {
             if (p.script == null || p.done) continue;
-            boolean near = Math.abs(p.centerX() - player.centerX()) < 90
+            boolean near = Math.abs(p.centerX() - player.centerX()) < 70
                     && (current.sideView || Math.abs(p.centerY() - player.centerY()) < 90);
             if (near) { startDialog(p); return; }
         }
@@ -1989,7 +1999,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // первое нажатие дописывает реплику, второе — переходит к следующей
     private void advanceDialog() {
-        if (dialog == null) return;
+        if (dialog == null || dialogT < 12) return;               // первые кадры реплики пропустить нельзя
         int full = dialogText().length() * DIALOG_TYPE;
         if (dialogT < full) { dialogT = full; return; }
         if (++dialogIdx >= dialog.length) endDialog(); else dialogT = 0;
@@ -1999,6 +2009,8 @@ public class GamePanel extends JPanel implements KeyListener {
         Prop p = dialogProp;
         dialog = null;
         dialogProp = null;
+        inputLock = 30;                                      // после реплики E / L полсекунды ничего не выбирают
+        dialogCool = 90;                                     // и следующая реплика не вылезает сразу
         if (p == null) return;
         if (p.input) {                                       // зеркало: после сценки — окно ввода (потом E у зеркала откроет его снова)
             p.done = true;
@@ -2019,7 +2031,7 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     // ====== МИНИ-ИГРА «ВЫРВИСЬ» ======
-    // Шкала всё время падает (он держит), каждое нажатие E / ПРОБЕЛ её поднимает. Заполнила — вырвалась.
+    // Шкала всё время падает (он держит), каждое нажатие E её поднимает. Заполнила — вырвалась.
     // Шкала упала до нуля или вышло время — не удержалась: плохой поступок (грех Похоти) и проклятие.
     private void startMash(Prop p) {
         mashProp = p;
@@ -2083,7 +2095,7 @@ public class GamePanel extends JPanel implements KeyListener {
         drawCentered(g, mashProp.mashTitle != null ? mashProp.mashTitle : "ВЫРВИСЬ!", top + 50);
         g.setFont(new Font("Monospaced", Font.BOLD, 18));
         g.setColor(Color.WHITE);
-        drawCentered(g, mashProp.mashHint != null ? mashProp.mashHint : "Жми E или ПРОБЕЛ как можно быстрее — не дай себя удержать", top + 78);
+        drawCentered(g, mashProp.mashHint != null ? mashProp.mashHint : "Жми E как можно быстрее — не дай себя удержать", top + 78);
 
         int w = 560, h = 26, x = (Room.VIEW_W - w) / 2, y = top + 98;
         double pr = Math.max(0, Math.min(1, mashProgress));
@@ -2117,7 +2129,7 @@ public class GamePanel extends JPanel implements KeyListener {
         drawWrapped(g, full, n, 40, y + 66, Room.VIEW_W - 80, 30);
         g.setFont(new Font("Monospaced", Font.PLAIN, 13));
         g.setColor(new Color(150, 150, 180));
-        String hint = "ПРОБЕЛ — дальше    ESC — пропустить";
+        String hint = "E / ПРОБЕЛ — дальше    ESC — пропустить";
         g.drawString(hint, Room.VIEW_W - g.getFontMetrics().stringWidth(hint) - 14, y + h - 10);
     }
 
@@ -2235,6 +2247,9 @@ public class GamePanel extends JPanel implements KeyListener {
         catIntro.clear();
         carryToy = -1;
         carryCrest = -1;
+        carryCrestProp = null;
+        inputLock = dialogCool = 0;
+        heldAt.clear();
         carryGDress = carryTItem = -1;
         inputProp = null;
         slowTimer = poisonTimer = darkTimer = weakTimer = 0;
@@ -2290,6 +2305,7 @@ public class GamePanel extends JPanel implements KeyListener {
         dialogProp = null;
         mashProp = null;
         mashDown.clear();
+        heldAt.clear();
         inputProp = null;
         up = down = left = right = jump = false;
         invOpen = false;
@@ -2300,6 +2316,7 @@ public class GamePanel extends JPanel implements KeyListener {
         adminHide();
         up = down = left = right = jump = false;
         mashDown.clear();
+        heldAt.clear();
     }
 
     public void resume() {
@@ -2331,6 +2348,9 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     private void enterRoom(Room r) {
+        if (current != null && current != r) dropCarried();     // то, что Эльза несла, возвращается на место: не тащим вазу/платье в другую комнату
+        dialogCool = 50;                                          // после входа реплики не вылезают сразу
+        r.fixFloatingSpikes();
         sleepThought = false;
         current = r;
         int chosen = 0;                                           // Гордыня, комната 1: сколько верных платьев уже выбрано — столько и темноты
@@ -2362,12 +2382,14 @@ public class GamePanel extends JPanel implements KeyListener {
         if (blackTimer > 0) { if (--blackTimer == 0) blackText = "…ах…"; return; }            // тёмный экран: мир стоит
         if (messageTimer > 0) messageTimer--;
         if (titleTimer > 0) titleTimer--;
+        if (inputLock > 0) inputLock--;
+        if (dialogCool > 0) dialogCool--;
         updatePride();
         if (invOpen || won) return;                              // в инвентаре мир стоит
-        if (dialog != null) { dialogT++; return; }               // во время реплики мир тоже стоит
-        if (inputProp != null) return;                           // и пока открыто окно ввода у зеркала
-        if (jigProp != null) { if (jigWin > 0 && --jigWin == 0) finishJigsaw(); return; }   // и пока открыт пазл
-        if (mashProp != null) { updateMash(); return; }          // во время «вырвись» мир тоже стоит
+        if (dialog != null) { dialogT++; settlePlayer(); return; }               // во время реплики мир тоже стоит
+        if (inputProp != null) { settlePlayer(); return; }       // и пока открыто окно ввода у зеркала
+        if (jigProp != null) { settlePlayer(); if (jigWin > 0 && --jigWin == 0) finishJigsaw(); return; }   // и пока открыт пазл
+        if (mashProp != null) { settlePlayer(); updateMash(); return; }          // во время «вырвись» мир тоже стоит
 
         // ----- эффекты -----
         if (slowTimer > 0) slowTimer--;
@@ -2482,6 +2504,35 @@ public class GamePanel extends JPanel implements KeyListener {
         updateCamera();
     }
 
+    // Эльза выходит из комнаты, не поставив то, что несла: всё возвращается на свои места
+    private void dropCarried() {
+        returnCrest();
+        if (carryGDress >= 0) { Prop q = findProp("GDRESS", carryGDress); if (q != null) q.solved = false; }
+        carryGDress = -1;
+        if (carryTItem >= 0) { Prop q = findProp("TITEM", carryTItem); if (q != null) q.solved = false; }
+        carryTItem = -1;
+        if (carryToy >= 0) for (Prop q : current.props) if (q.kind == Prop.Kind.TOY_TABLE) q.toyMask |= 1 << carryToy;
+        carryToy = -1;
+    }
+
+    // ваза возвращается на свою стойку
+    private void returnCrest() {
+        if (carryCrestProp != null) carryCrestProp.solved = false;
+        carryCrestProp = null;
+        carryCrest = -1;
+    }
+
+    // пока идёт реплика / мини-игра, мир стоит, но Эльза всё равно должна упасть на пол (иначе зависает в воздухе после прыжка)
+    private void settlePlayer() {
+        if (current == null || !current.sideView) return;
+        player.moving = false;
+        player.vy = Math.min(player.vy + GRAVITY, MAX_FALL);
+        int wantY = (int) Math.round(player.vy);
+        int oldY = player.y;
+        player.move(current, 0, wantY);
+        if (player.y - oldY != wantY) { player.onGround = wantY > 0; player.vy = 0; } else player.onGround = false;
+    }
+
     // запоминает место, где можно безопасно постоять (не рядом с ямой, шипами, ловушкой и не на хрупкой плите)
     private void trackSafeSpot() {
         if (!current.sideView || !player.onGround || player.invul > 0) return;
@@ -2537,7 +2588,7 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     private void attack() {
-        if (invOpen || won || checkTimer > 0 || player.attackCooldown > 0) return;
+        if (invOpen || won || checkTimer > 0 || inputLock > 0 || player.attackCooldown > 0) return;
         player.attackTimer = Player.ATTACK_FRAMES;
         player.attackCooldown = ATTACK_COOLDOWN;
 
@@ -2656,7 +2707,7 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     private void interact() {
-        if (invOpen || won || checkTimer > 0) return;
+        if (invOpen || won || checkTimer > 0 || inputLock > 0) return;
         Decision cc = current.choice;
         if (cc != null && !cc.decided && marksPending()
                 && Math.hypot(cc.centerX() - player.centerX(), cc.centerY() - player.centerY()) < 80) {
@@ -2727,6 +2778,8 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // вызывается, когда игрок выходит через открытую дверь-выход
     private void onRoomCompleted(Room r) {
+        player.hp = player.maxHp;                                  // комната пройдена — сердца восстанавливаются (иначе 5 сердец на всю игру)
+        poisonTimer = 0;
         if (r.key != null && r.key.startsWith("road")) {          // спустился в следующую локацию
             int loc = r.key.charAt(4) - '0';
             if (loc < LOCS) showMessage("Ты спустился глубже: локация " + (loc + 1));
@@ -3068,7 +3121,7 @@ public class GamePanel extends JPanel implements KeyListener {
             case CAT     -> r.exitLocked ? "Цель: спаси кота (E) или убей его (L)" : open;
             case CHOICE  -> r.exitLocked ? "Цель: сделай выбор (E или L)" : open;
             case PUZZLE  -> r.exitLocked ? ("ответь зеркалу".equals(r.goalLabel) ? "Цель: подойди к зеркалу и ответь Анне" : "Цель: " + r.goalLabel + " (E у предметов в комнате)") : open;
-            case ESCAPE  -> r.exitLocked ? ("вырвись".equals(r.goalLabel) ? "Цель: подойди к нему и вырвись (E / ПРОБЕЛ)" : "Цель: подойди к Себастьяну и открой дверь (E / ПРОБЕЛ)") : open;
+            case ESCAPE  -> r.exitLocked ? ("вырвись".equals(r.goalLabel) ? "Цель: подойди к нему и вырвись (E)" : "Цель: подойди к Себастьяну и открой дверь (E)") : open;
             default      -> "Цель: дойди до выхода справа";
         };
     }
@@ -3523,6 +3576,11 @@ public class GamePanel extends JPanel implements KeyListener {
             return;
         }
 
+        int hk = isKey(e, KeyEvent.VK_E, 'у') ? KeyEvent.VK_E : isKey(e, KeyEvent.VK_L, 'д') ? KeyEvent.VK_L : k;
+        long nowMs = System.currentTimeMillis();
+        Long prevMs = heldAt.put(hk, nowMs);
+        boolean fresh = prevMs == null || nowMs - prevMs > 1000;          // false — это автоповтор зажатой клавиши
+
         if (cutscene != null) {
             if (k == KeyEvent.VK_ESCAPE) cutscene.skip();
             else if (k == KeyEvent.VK_SPACE || k == KeyEvent.VK_ENTER || isKey(e, KeyEvent.VK_E, 'у')) cutscene.advance();
@@ -3564,14 +3622,13 @@ public class GamePanel extends JPanel implements KeyListener {
         }
 
         if (mashProp != null) {                                          // «вырвись»: считаем только новые нажатия
-            int code = isKey(e, KeyEvent.VK_E, 'у') ? KeyEvent.VK_E : k;
-            if ((code == KeyEvent.VK_SPACE || code == KeyEvent.VK_E || code == KeyEvent.VK_ENTER) && mashDown.add(code)) mashPress();
+            if (isKey(e, KeyEvent.VK_E, 'у') && mashDown.add(KeyEvent.VK_E)) mashPress();   // только E: пробел и Enter не считаются
             return;
         }
 
         if (dialog != null) {                                            // идёт реплика Эльзы
             if (k == KeyEvent.VK_ESCAPE) endDialog();
-            else if (k == KeyEvent.VK_SPACE || k == KeyEvent.VK_ENTER || isKey(e, KeyEvent.VK_E, 'у')) advanceDialog();
+            else if (fresh && (k == KeyEvent.VK_SPACE || k == KeyEvent.VK_ENTER || isKey(e, KeyEvent.VK_E, 'у'))) advanceDialog();
             return;
         }
 
@@ -3590,8 +3647,8 @@ public class GamePanel extends JPanel implements KeyListener {
             return;
         }
 
-        if (isKey(e, KeyEvent.VK_L, 'д')) { attack(); return; }          // меч — L
-        if (isKey(e, KeyEvent.VK_E, 'у')) { interact(); return; }
+        if (isKey(e, KeyEvent.VK_L, 'д')) { if (fresh) attack(); return; }          // меч — L
+        if (isKey(e, KeyEvent.VK_E, 'у')) { if (fresh) interact(); return; }
 
         switch (k) {
             case KeyEvent.VK_W, KeyEvent.VK_UP -> up = true;
@@ -3607,6 +3664,9 @@ public class GamePanel extends JPanel implements KeyListener {
     @Override
     public void keyReleased(KeyEvent e) {
         mashDown.remove(e.getKeyCode());
+        heldAt.remove(e.getKeyCode());
+        if (isKey(e, KeyEvent.VK_E, 'у')) heldAt.remove(KeyEvent.VK_E);
+        if (isKey(e, KeyEvent.VK_L, 'д')) heldAt.remove(KeyEvent.VK_L);
         if (isKey(e, KeyEvent.VK_E, 'у')) mashDown.remove(KeyEvent.VK_E);
         switch (e.getKeyCode()) {
             case KeyEvent.VK_W, KeyEvent.VK_UP -> up = false;

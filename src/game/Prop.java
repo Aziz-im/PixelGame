@@ -223,7 +223,7 @@ public class Prop {
             case TOY_TABLE -> big(g, x, y, 1.5, () -> drawToyTable(g, fx, fy));
             case DOC -> big(g, x, y, 1.9, () -> drawDoc(g, fx, fy));
             case POUCH -> drawPouch(g, x, y, tick);
-            case CREST_VASE -> drawCrestVase(g, x, y);
+            case CREST_VASE -> { if (!solved) drawCrestVase(g, x, y); else shadow(g, x, y, 36); }   // взятая ваза со стойки исчезает
             case PEDESTAL -> drawPedestal(g, x, y, tick);
             case WALL_ITEM -> drawWallItem(g, x, y);
             case PORTRAIT -> drawPortrait(g, x, y, tick);
@@ -1039,13 +1039,19 @@ public class Prop {
             g.fillOval(x - 8, y - 38, T + 16, 60);
             vaseShape(g, x, y - 32, placed);
         }
-        g.setColor(new Color(110, 112, 128));                      // постамент
+        g.setColor(new Color(16, 15, 21));                         // постамент: чёрный камень, как у постаментов галереи
         g.fillRect(x + 8, y + 18, 32, 28);
-        g.setColor(new Color(150, 152, 170));
+        g.setColor(new Color(22, 20, 28));                         // шапка и основание
         g.fillRect(x + 4, y + 12, 40, 7);
         g.fillRect(x + 4, y + 43, 40, 4);
-        g.setColor(new Color(76, 78, 92));
-        g.fillRect(x + 8, y + 18, 3, 28);
+        g.setColor(new Color(70, 66, 80));
+        g.fillRect(x + 4, y + 12, 40, 2);
+        g.setColor(new Color(48, 46, 58));                         // светлая грань слева
+        g.fillRect(x + 8, y + 19, 2, 24);
+        g.setColor(new Color(7, 6, 9));                            // тёмная грань справа
+        g.fillRect(x + 38, y + 19, 2, 24);
+        g.setColor(new Color(58, 55, 70));                         // плитка под гербом, чтобы герб читался на чёрном
+        g.fillRect(x + 15, y + 23, 18, 16);
         crestIcon(g, x + 24, y + 31, want, 0.6);                   // табличка с гербом на передней грани
     }
 

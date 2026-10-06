@@ -312,7 +312,7 @@ public class Decision {
         g.fillRect(x + 4, y + 30, 40, 6);
         g.setColor(new Color(236, 236, 242));                      // подушка
         g.fillRect(x + 4, y + 26, 12, 6);
-        cat.draw(g, tick);                                         // кот на кровати
+        if (showCat) cat.draw(g, tick);                            // кот на кровати (если кошка уже на плечах у Эльзы — второй не рисуем)
         if (bad) {                                                 // сон
             g.setFont(new Font("Monospaced", Font.BOLD, 16));
             g.setColor(new Color(200, 220, 255, 200));

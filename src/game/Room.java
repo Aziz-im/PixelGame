@@ -97,6 +97,25 @@ public class Room {
         if (!vases.isEmpty()) vases.get(RND.nextInt(vases.size())).hasCandle = true;   // свеча в случайной вазе
     }
 
+    // шипы без пола под собой (над ямой или пустотой) не рисуем и не считаем опасными: иначе они «висят в воздухе»
+    public void fixFloatingSpikes() {
+        if (!sideView) return;
+        for (int r = 0; r < map.length - 1; r++) {
+            for (int c = 0; c < map[r].length(); c++) {
+                if (map[r].charAt(c) == '^' && !floorBelow(c, r)) {
+                    map[r] = map[r].substring(0, c) + '.' + map[r].substring(c + 1);
+                }
+            }
+        }
+        traps.removeIf(t -> t.type == Trap.Type.HIDDEN_SPIKES && !floorBelow(t.col, t.row));
+    }
+
+    private boolean floorBelow(int c, int r) {
+        if (tileAt(c, r + 1) == '#') return true;
+        for (Trap t : traps) if (t.type == Trap.Type.CRUMBLE && t.col == c && t.row == r + 1) return true;
+        return false;
+    }
+
     public int cols()     { return map[0].length(); }
     public int rows()     { return map.length; }
     public int widthPx()  { return cols() * TILE; }
@@ -553,9 +572,9 @@ public class Room {
             g.setColor(new Color(24, 34, 52));
             g.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
         }
-        // один большой шип на всю клетку: левая грань светлая, правая тёмная
+        // один большой шип на всю клетку: левая грань светлая, правая тёмная; основание стоит прямо на полу
         int left = x + 4, right = x + TILE - 4, mid = x + TILE / 2;
-        int top = y + 3, base = y + TILE - 4;
+        int top = y + 3, base = y + TILE;
         g.setColor(new Color(204, 212, 228));
         g.fillPolygon(new int[]{left, mid, mid}, new int[]{base, top, base}, 3);
         g.setColor(new Color(142, 151, 172));
@@ -728,6 +747,7 @@ public class Room {
         for (int k = c - 2; k <= c + 2; k++) {
             if (k < 0 || k >= cols()) return false;
             if (map[9].charAt(k) != '.' || map[10].charAt(k) != '#') return false;   // только чистый пол
+            if (map[8].charAt(k) != '.') return false;                                // и ничего над ним (платформы, предметы)
         }
         for (Trap t : traps) if (c >= t.minCol() - 2 && c <= t.maxCol() + 2) return false;
         for (Sign s : signs) if (Math.abs(s.col() - c) <= 2) return false;
