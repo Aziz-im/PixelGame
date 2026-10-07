@@ -47,9 +47,11 @@ public class Room {
     public Cat cat;                                  // кот этой комнаты (если он тут есть)
     public boolean sideView;                         // true = вид сбоку (платформер)
     public Decision choice;                            // выбор «добро / зло» в комнате греха
+    public int hallLoc;                              // >0 — это коридор локации с таким номером (оформление HallDecor)
     public boolean basement;                         // подвал: кирпичные стены и железные двери
     public final Set<Character> lockedDoors = new HashSet<>();   // двери, которые пока заперты (коридор)
 
+    public Theme decorTheme;                         // цвета украшений коридора (тема греха)
     public Theme theme = Theme.TUTORIAL;             // цвет и атмосфера локации
     // оформление: GALLERY — кирпичная галерея с лампами (комнаты), VOID — почти чёрное (спуски и коридоры), CLASSIC — старый вид
     public enum Look { CLASSIC, GALLERY, VOID }
@@ -228,6 +230,7 @@ public class Room {
             }
         }
 
+        if (hallLoc > 0 && !sideView) HallDecor.draw(g, hallLoc, decorTheme != null ? decorTheme : theme, c0, c1, cols(), tick);
         if (sideView && look == Look.GALLERY) drawGalleryFront(g, camX);
         for (Trap t : traps) t.draw(g, tick, theme);
         for (Sign s : signs) drawSign(g, s);

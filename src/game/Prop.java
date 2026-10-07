@@ -612,7 +612,7 @@ public class Prop {
     }
 
     // ---------- Гордыня, комната 1: манекены со старыми платьями Эльзы ----------
-    // Настоящие платья простые и поношенные, на подоле вышита буква «Э». Платья «из мечты» блестят золотом и камнями — это гордыня.
+    // Настоящие платья простые и поношенные, простые, без украшений. Платья «из мечты» блестят золотом и камнями — это гордыня.
     private void drawPrideDress(Graphics2D g, int x, int y, int tick) {
         if (flash > 0) flash--;
         Color[] real = {new Color(118, 150, 200), new Color(232, 218, 184), new Color(112, 152, 112)};
@@ -653,17 +653,12 @@ public class Prop {
                 g.fillRect(x + 36, y + 12, 2, 8);
                 g.fillRect(x + 33, y + 15, 8, 2);
             }
-        } else {                                                   // потёртость, штопка и вышитая «Э»
+        } else {                                                   // потёртость и штопка
             g.setColor(Theme.mix(c, Color.WHITE, 0.25));
             g.fillRect(x + 22, y - 10, 4, 14);
             g.setColor(Theme.mix(c, Color.BLACK, 0.35));
             g.fillRect(x + 12, y + 20, 5, 1);                      // шов
             g.fillRect(x + 11, y + 22, 5, 1);
-            Font of = g.getFont();
-            g.setFont(new Font("Monospaced", Font.BOLD, 13));
-            g.setColor(new Color(250, 236, 190));
-            g.drawString("Э", x + 19, y + 38);
-            g.setFont(of);
         }
     }
 
@@ -681,37 +676,52 @@ public class Prop {
         g.setColor(new Color(130, 86, 46));
         g.fillRect(left - 6, top + ph - 6, pw + 12, 7);
 
-        AffineTransform old = g.getTransform();
-        Shape oldClip = g.getClip();
         if (solved) {                                              // собранная картина тёплого света
             g.setColor(new Color(255, 230, 150, 60 + (int) (Math.sin(tick * 0.06) * 18)));
             g.fillOval(left - 24, top - 20, pw + 48, ph + 40);
-            g.translate(left, top);
-            g.scale(sc, sc);
-            paintFamilyPicture(g);
-        } else {                                                   // осколки: шесть кусков чуть сдвинуты и потемнели
+            Graphics2D gp = (Graphics2D) g.create();
+            gp.translate(left, top);
+            gp.scale(sc, sc);
+            paintFamilyPicture(gp);
+            gp.dispose();
+        } else {                                                   // разобранная картина: шесть кусков со щелями, но она всегда на месте
+            g.setColor(new Color(40, 28, 20));
+            g.fillRect(left, top, pw, ph);
             for (int i = 0; i < 6; i++) {
                 int cx = (i % 3) * 160, cy = (i / 3) * 120;
-                g.setTransform(old);
-                g.translate(left, top);
-                g.scale(sc, sc);
-                g.clipRect(cx + 3, cy + 3, 154, 114);
-                g.translate((i * 7) % 5 - 2, (i * 5) % 4 - 1);
-                paintFamilyPicture(g);
-                g.setClip(oldClip);
-                g.setTransform(old);
-                g.translate(left, top);
-                g.scale(sc, sc);
-                g.setColor(new Color(0, 0, 0, 95));
-                g.fillRect(cx, cy, 160, 120);
+                Graphics2D gp = (Graphics2D) g.create();           // отдельная копия: clip и transform не портят общий контекст
+                gp.translate(left, top);
+                gp.scale(sc, sc);
+                gp.clipRect(cx + 3, cy + 3, 154, 114);
+                gp.translate((i * 7) % 5 - 2, (i * 5) % 4 - 1);
+                paintFamilyPicture(gp);
+                gp.dispose();
+                Graphics2D gd = (Graphics2D) g.create();
+                gd.translate(left, top);
+                gd.scale(sc, sc);
+                gd.setColor(new Color(0, 0, 0, 70));
+                gd.fillRect(cx + 3, cy + 3, 154, 114);
+                gd.dispose();
             }
         }
-        g.setTransform(old);
-        g.setClip(oldClip);
         if (!solved && (tick / 30) % 2 == 0) {                     // мерцает подсказка «можно подойти»
             g.setColor(new Color(255, 255, 255, 40));
             g.fillOval(left + pw / 2 - 20, top + ph / 2 - 10, 40, 20);
         }
+    }
+
+    // рука: рукав от плеча до локтя, голое предплечье до запястья и ладонь
+    private static void arm(Graphics2D g, int sx, int sy, int ex, int ey, int hx, int hy, int th, Color sleeve, Color skin) {
+        Stroke os = g.getStroke();
+        g.setStroke(new BasicStroke(th, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(sleeve);
+        g.drawLine(sx, sy, ex, ey);
+        g.setStroke(new BasicStroke(Math.max(3, th - 4), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(skin);
+        g.drawLine(ex, ey, hx, hy);
+        g.setStroke(os);
+        int r = Math.max(3, th / 2 + 1);
+        g.fillOval(hx - r, hy - r, r * 2, r * 2);
     }
 
     // Семейная картина 480x240 (отец, мать и маленькая Эльза). Рисуется с началом координат в левом верхнем углу.
@@ -815,16 +825,6 @@ public class Prop {
         g.fillRect(262, 214, 18, 22);
         g.fillRect(292, 214, 18, 22);
 
-        // руки: отец — мать, мать — девочка
-        g.setColor(new Color(52, 60, 92));
-        g.fillRect(214, 116, 54, 8);
-        g.setColor(skin);
-        g.fillRect(236, 116, 14, 8);
-        g.setColor(new Color(160, 60, 88));
-        g.fillPolygon(new int[]{300, 360, 360, 300}, new int[]{114, 150, 158, 124}, 4);
-        g.setColor(skin);
-        g.fillRect(346, 148, 14, 10);
-
         // Эльза
         g.setColor(new Color(236, 200, 222));                      // платье
         g.fillPolygon(new int[]{362, 390, 404, 348}, new int[]{158, 158, 216, 216}, 4);
@@ -848,8 +848,39 @@ public class Prop {
         g.fillRect(368, 134, 3, 3);
         g.fillRect(379, 134, 3, 3);
         g.fillRect(371, 142, 8, 2);
+        // шеи, румянец и брови (поверх лиц)
         g.setColor(skin);
-        g.fillRect(396, 164, 28, 8);                               // вторая рука тянется к краю кадра
+        g.fillRect(183, 94, 14, 12);
+        g.fillRect(280, 97, 12, 12);
+        g.fillRect(372, 146, 8, 14);
+        g.setColor(new Color(214, 160, 150));
+        g.fillRect(183, 104, 14, 2);
+        g.setColor(new Color(240, 150, 150, 120));
+        g.fillOval(176, 80, 8, 6);
+        g.fillOval(196, 80, 8, 6);
+        g.fillOval(271, 84, 8, 6);
+        g.fillOval(291, 84, 8, 6);
+        g.fillOval(363, 139, 7, 5);
+        g.fillOval(380, 139, 7, 5);
+        g.setColor(new Color(50, 32, 24));
+        g.fillRect(180, 69, 9, 2);
+        g.fillRect(194, 69, 9, 2);
+        g.fillRect(275, 73, 9, 2);
+        g.fillRect(287, 73, 9, 2);
+
+        // руки: у каждого — рукав, предплечье и ладонь, чтобы не выглядели кривыми
+        Color jacket = new Color(52, 60, 92), jacketDk = new Color(40, 46, 74);
+        Color gown = new Color(160, 60, 88), gownDk = new Color(128, 44, 70);
+        arm(g, 170, 112, 164, 146, 160, 172, 11, jacketDk, skin);          // отец: левая рука опущена
+        arm(g, 210, 112, 224, 146, 243, 164, 11, jacket, skin);            // отец держит маму за руку
+        arm(g, 277, 114, 268, 146, 247, 164, 9, gownDk, skin);             // мама: рука к папе
+        arm(g, 298, 114, 322, 148, 350, 170, 9, gown, skin);               // мама: рука к дочке
+        arm(g, 366, 166, 358, 170, 352, 172, 6, new Color(236, 200, 222), skin);   // Эльза берёт маму за руку
+        arm(g, 388, 166, 396, 190, 398, 204, 6, new Color(236, 200, 222), skin);   // Эльза: вторая рука опущена
+        g.setColor(skin);                                                  // сцепленные ладони
+        g.fillOval(240, 158, 12, 12);
+        g.setColor(new Color(214, 160, 150));
+        g.fillRect(244, 166, 4, 1);
 
         // рамка по краю
         g.setColor(new Color(214, 170, 60));

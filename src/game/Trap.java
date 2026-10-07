@@ -63,9 +63,9 @@ public class Trap {
                     case 0 -> {
                         boolean near = Math.abs(p.centerX() - (col * T + T / 2)) < 88
                                 && Math.abs(p.centerY() - (row * T + T / 2)) < 70;
-                        if (near) { state = 1; timer = 14; }          // предупреждение: шипы дрожат
+                        if (near) { state = 1; timer = 14; sfx(Sound.Sfx.SPIKE_WARN, p, 0.8); }   // предупреждение: шипы дрожат
                     }
-                    case 1 -> { if (--timer <= 0) { state = 2; timer = 90; } }   // выскочили
+                    case 1 -> { if (--timer <= 0) { state = 2; timer = 90; sfx(Sound.Sfx.SPIKES, p, 1.0); } }   // выскочили
                     case 2 -> { if (--timer <= 0) { state = 3; timer = 40; } }   // прячутся
                     default -> { if (--timer <= 0) state = 0; }
                 }
@@ -73,23 +73,42 @@ public class Trap {
             case CRUMBLE -> {
                 if (state == 0) {
                     boolean standing = p.y + p.h == row * T && p.x + p.w > col * T && p.x < (col + 1) * T;
-                    if (standing) { state = 1; timer = 34; }
+                    if (standing) { state = 1; timer = 34; sfx(Sound.Sfx.CRUMBLE, p, 1.0); }
                 } else if (state == 1) {
-                    if (--timer <= 0) { state = 2; timer = 170; }
+                    if (--timer <= 0) { state = 2; timer = 170; sfx(Sound.Sfx.ROCK_HIT, p, 0.5); }
                 } else if (--timer <= 0 && !new Rectangle(col * T, row * T, T, T).intersects(p.box())) {
                     state = 0;                                         // вернулась (если игрок не внутри неё)
                 }
             }
             case ROCK -> {
                 switch (state) {
-                    case 0 -> { if (Math.abs(p.centerX() - (col * T + T / 2)) < ROCK_RADIUS) { state = 1; timer = ROCK_WARN; } }   // дрожит
+                    case 0 -> { if (Math.abs(p.centerX() - (col * T + T / 2)) < ROCK_RADIUS) { state = 1; timer = ROCK_WARN; sfx(Sound.Sfx.ROCK_WARN, p, 1.0); } }   // дрожит
                     case 1 -> { if (--timer <= 0) { state = 2; timer = ROCK_FALL; } }                                             // падает
-                    case 2 -> { if (--timer <= 0) { state = 3; timer = 110; } }                                                   // обломки лежат
+                    case 2 -> { if (--timer <= 0) { state = 3; timer = 110; sfx(Sound.Sfx.ROCK_HIT, p, 1.0); } }                  // обломки лежат
                     default -> { if (--timer <= 0) state = 0; }                                                                   // новый камень
                 }
             }
+            case ARROW -> {                                          // state хранит прошлую фазу: звук только в момент выстрела
+                int ph = arrowPhase(tick);
+                if (ph == 2 && state != 2) sfx(Sound.Sfx.ARROW, p, 0.4);
+                state = ph;
+            }
+            case FLAME -> {
+                int ph = flamePhase(tick);
+                if (ph == 2 && state != 2) sfx(Sound.Sfx.FLAME, p, 1.0);
+                state = ph;
+            }
             default -> { }
         }
+    }
+
+    // звук ловушки: чем дальше от Эльзы, тем тише; совсем далеко — не играет
+    private void sfx(Sound.Sfx s, Player p, double vol) {
+        double d = Math.hypot(p.centerX() - (col * T + T / 2), p.centerY() - (row * T + T / 2));
+        if (d > 560) return;
+        double near = 1 - d / 560.0;
+        double v = vol * (0.5 + 0.5 * near);                 // вблизи лишь чуть громче, чем вдали: звук не «вырастает» при приближении
+        Sound.play(s, v);
     }
 
     // ----- камень -----

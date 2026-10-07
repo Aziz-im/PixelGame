@@ -34,14 +34,6 @@ public class MainMenuPanel extends JPanel {
     private static final int BTN_CY2 = 78;                            // центр колонки по Y, когда кнопок две
     private static final int BTN_CY3 = 75;                            // ...и когда три
 
-    // ===== НАСТРОЙКИ: цитата внизу справа (в полном разрешении, в пикселях экрана 960x576) =====
-    private static final String VERSE = "Ибо возмездие за грех — смерть, а дар Божий — жизнь вечная во Христе Иисусе, Господе нашем.";
-    private static final String VERSE_REF = "Рим. 6:23";
-    private static final int VERSE_CX = BTN_CX * S;                   // центр по X — под колонкой кнопок
-    private static final int VERSE_W = 440;                           // максимальная ширина строки
-    private static final int VERSE_Y = 400;                           // верх текста по Y
-    private static final int VERSE_SIZE = 20;                         // размер шрифта
-
     private enum Act { CONTINUE, PLAY, EXIT }
 
     private static final class Btn {
@@ -169,9 +161,9 @@ public class MainMenuPanel extends JPanel {
 
     private static BufferedImage loadBg() {
         try {
-            java.net.URL u = MainMenuPanel.class.getResource("mune_bg.png");
+            java.net.URL u = MainMenuPanel.class.getResource("menu_bg.png");
             if (u != null) return ImageIO.read(u);
-            File f = new File("src/game/mune_bg.png");               // запасной путь, если запускаешь не из IDE
+            File f = new File("src/game/menu_bg.png");               // запасной путь, если запускаешь не из IDE
             if (f.exists()) return ImageIO.read(f);
         } catch (Exception ignored) { }
         return null;
@@ -229,7 +221,6 @@ public class MainMenuPanel extends JPanel {
         g.drawImage(fx, 0, 0, W, H, null);
 
         drawProgressText(g);
-        drawVerse(g);
         g.dispose();
     }
 
@@ -310,56 +301,6 @@ public class MainMenuPanel extends JPanel {
             g.setColor(sel == i ? new Color(255, 206, 150) : new Color(178, 184, 198));
             g.drawString(progress, x, y);
         }
-    }
-
-    // цитата из Писания: чёткий текст по центру правой колонки, с тенью, чтобы читалось на любом фоне
-    private void drawVerse(Graphics2D g) {
-        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-        Font f = new Font(Font.SERIF, Font.ITALIC, VERSE_SIZE);
-        FontMetrics fm = g.getFontMetrics(f);
-        g.setFont(f);
-
-        // перенос по словам
-        List<String> lines = new ArrayList<>();
-        StringBuilder cur = new StringBuilder();
-        for (String word : VERSE.split(" ")) {
-            String test = cur.length() == 0 ? word : cur + " " + word;
-            if (fm.stringWidth(test) > VERSE_W && cur.length() > 0) {
-                lines.add(cur.toString());
-                cur = new StringBuilder(word);
-            } else {
-                cur = new StringBuilder(test);
-            }
-        }
-        if (cur.length() > 0) lines.add(cur.toString());
-
-        int lineH = fm.getHeight() + 2;
-        int y = VERSE_Y + fm.getAscent();
-
-        // тонкая линия над цитатой
-        g.setColor(new Color(150, 40, 40, 170));
-        g.fillRect(VERSE_CX - 40, VERSE_Y - 14, 80, 2);
-
-        for (String line : lines) {
-            int x = VERSE_CX - fm.stringWidth(line) / 2;
-            g.setColor(new Color(0, 0, 0, 220));
-            g.drawString(line, x + 2, y + 2);
-            g.setColor(new Color(232, 226, 214));
-            g.drawString(line, x, y);
-            y += lineH;
-        }
-
-        // ссылка на стих
-        Font rf = new Font(Font.SERIF, Font.PLAIN, VERSE_SIZE - 4);
-        FontMetrics rfm = g.getFontMetrics(rf);
-        g.setFont(rf);
-        int rx = VERSE_CX - rfm.stringWidth(VERSE_REF) / 2;
-        y += 4;
-        g.setColor(new Color(0, 0, 0, 220));
-        g.drawString(VERSE_REF, rx + 1, y + 1);
-        g.setColor(new Color(200, 70, 70));
-        g.drawString(VERSE_REF, rx, y);
     }
 
     private BufferedImage stone(int w, int h, boolean hot) {

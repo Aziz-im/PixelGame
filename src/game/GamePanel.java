@@ -477,6 +477,8 @@ public class GamePanel extends JPanel implements KeyListener {
         if (loc == 2) hb.set(5, 5, 'C');                       // в коридоре Алчности сидит кошка — она пойдёт с Эльзой до конца игры
         Room hall = new Room("Коридор · " + SIN_NAMES[loc - 1], hb.build());
         hall.theme = Theme.HALL;
+        hall.hallLoc = loc;
+        hall.decorTheme = SIN_THEMES[loc - 1];
         hall.basement = true;                                  // кирпичные стены и железные двери (общее для всех локаций)
         hall.look = Room.Look.VOID;                            // почти чёрное оформление
         hall.title = "ЛОКАЦИЯ " + loc;
@@ -624,11 +626,11 @@ public class GamePanel extends JPanel implements KeyListener {
             case 5 -> {
                 r.goal = Room.Goal.PUZZLE;
                 if (loc == 1) {                                     // Гнев: три загадки
-                    r.goalLabel = n == 1 ? "найди вазу Осмаров" : n == 2 ? "расставь предметы" : "расставь портреты";
-                    r.subtitle = n == 1 ? "Музей Осмаров: найди вазу с гербом семьи"
+                    r.goalLabel = n == 1 ? "расставь вазы по гербам" : n == 2 ? "расставь предметы" : "расставь портреты";
+                    r.subtitle = n == 1 ? "Музей Осмаров: поставь вазы на пьедесталы с такими же гербами"
                             : n == 2 ? "Комната наказаний: расставь предметы по порядку"
                             : "Семья Осмаров: расставь портреты по иерархии";
-                    hint = n == 1 ? "Возьми вазу (E) и поставь на пьедестал с гербом Осмаров (E). Неверная ваза вернётся на место"
+                    hint = n == 1 ? "Возьми вазу (E) и поставь на пьедестал с таким же гербом (E). Нужно заполнить все три пьедестала; неверная ваза вернётся на место"
                             : n == 2 ? "Выбирай предметы клавишей E в правильном порядке. Ошибёшься — всё начнётся заново"
                             : "Ставь портреты (E) по порядку семьи. Ошибёшься — всё начнётся заново";
                 } else if (loc == 3) {                              // Зависть: две девочки и праздничный стол
@@ -647,7 +649,7 @@ public class GamePanel extends JPanel implements KeyListener {
                     r.goalLabel = n == 1 ? "выбери настоящие платья" : "собери картину";
                     r.subtitle = n == 1 ? "Комната 1 из 3: платья — выбери те, что были её настоящим прошлым"
                             : "Комната 2 из 3: семейный зал — собери картину семьи";
-                    hint = n == 1 ? "Настоящие платья Эльзы просты и потёрты, на подоле вышита «Э». Выбирай их (E) — но с каждым верным выбором в комнате темнее"
+                    hint = n == 1 ? "Настоящие платья Эльзы просты и потёрты, без золота и камней. Выбирай их (E) — но с каждым верным выбором в комнате темнее"
                             : "Подойди к разбитой картине на мольберте (E). Стрелки — выбрать кусок, E — взять и поменять местами";
                 } else if (loc == 6) {                              // Лень: ванная
                     r.goalLabel = "реши, что оставить";
@@ -1507,22 +1509,21 @@ public class GamePanel extends JPanel implements KeyListener {
                 showMessage("В руках ваза с гербом (над головой). Найди пьедестал с гербом Осмаров");
             }
             case "PEDESTAL" -> {
+                if (p.solved) { showMessage("На этом пьедестале уже стоит ваза"); return; }
                 if (carryCrest < 0) { showMessage("Сначала возьми вазу (E)"); return; }
                 if (carryCrest != p.want) {
                     returnCrest();
                     showMessage("Герб на вазе не совпадает с гербом пьедестала. Ваза вернулась на свою стойку");
                     return;
                 }
-                if (p.want != Prop.OSMAR_CREST) {
-                    returnCrest();
-                    showMessage("Это герб другого рода, не Осмаров. Ваза вернулась на свою стойку");
-                    return;
-                }
-                p.solved = true;
+                p.solved = true;                                             // верная ваза остаётся на пьедестале и рисуется на нём
                 p.placed = carryCrest;
                 carryCrest = -1;
-                carryCrestProp = null;                                       // ваза осталась стоять на пьедестале
-                unlockExit("Ваза Осмаров встала на свой пьедестал.");
+                carryCrestProp = null;
+                int done = 0, total = 0;
+                for (Prop q : current.props) if (q.kind == Prop.Kind.PEDESTAL) { total++; if (q.solved) done++; }
+                if (done >= total) unlockExit("Все вазы встали на свои пьедесталы.");   // выход открывается только когда заполнены ВСЕ пьедесталы
+                else showMessage("Ваза встала на пьедестал (" + done + "/" + total + ")");
             }
             case "SEQ" -> {
                 int progress = 0, total = 0;
@@ -2265,6 +2266,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // ================= СТАРТ / СТОП =================
     public void start() {                       // каждый запуск из меню = новая игра
+        Sound.preload();
         rooms.clear();
         done.clear();
         buildRooms();
@@ -2379,6 +2381,7 @@ public class GamePanel extends JPanel implements KeyListener {
         r.fixFloatingSpikes();
         sleepThought = false;
         current = r;
+        // музыка: коридор / комната / спуск
         int chosen = 0;                                           // Гордыня, комната 1: сколько верных платьев уже выбрано — столько и темноты
         for (Prop q : r.props) if (q.kind == Prop.Kind.PRIDE_DRESS && q.solved && !q.fake) chosen++;
         prideTarget = prideDark = chosen / 3.0;

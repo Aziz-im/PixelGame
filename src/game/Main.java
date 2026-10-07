@@ -108,6 +108,7 @@ class GameWindow extends JFrame {
 
     // Главное меню без сохранения: при запуске и после финала игры (GamePanel вызывает именно этот метод).
     public void showMenu() {
+        // <-- ДОБАВИТЬ
         gamePanel.stop();
         mainMenu.setProgress(null);
         show("MAIN");
@@ -115,10 +116,9 @@ class GameWindow extends JFrame {
 
     // ESC во время игры: пауза, мир замирает, ничего не сбрасывается
     public void showPause() {
-        gamePanel.pause();
+        gamePanel.pause();           // Sound.resume(); в начале строки удалить
         show("PAUSE");
     }
-
     // в меню паузы нажали ИГРАТЬ (или ещё раз ESC) / в главном меню нажали ПРОДОЛЖИТЬ
     public void resumeGame() { continueGame(); }
 
